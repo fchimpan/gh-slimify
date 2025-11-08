@@ -21,7 +21,8 @@ type Candidate struct {
 // Scan scans workflows and returns migration candidates
 // If paths are provided, only those files are scanned. Otherwise, all workflow files
 // in .github/workflows are scanned.
-func Scan(paths ...string) ([]*Candidate, error) {
+// skipDuration, if true, skips fetching job execution durations from GitHub API.
+func Scan(skipDuration bool, paths ...string) ([]*Candidate, error) {
 	var workflows []*workflow.Workflow
 	var err error
 
@@ -63,10 +64,12 @@ func Scan(paths ...string) ([]*Candidate, error) {
 		}
 	}
 
-	// Fetch duration from GitHub API for each candidate
-	if err := fetchDurations(candidates); err != nil {
-		// Log error but don't fail the scan
-		fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
+	// Fetch duration from GitHub API for each candidate (unless skipped)
+	if !skipDuration {
+		if err := fetchDurations(candidates); err != nil {
+			// Log error but don't fail the scan
+			fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
+		}
 	}
 
 	return candidates, nil

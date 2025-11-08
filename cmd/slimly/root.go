@@ -10,7 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var workflowFiles []string
+var (
+	workflowFiles []string
+	skipDuration  bool
+)
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -25,6 +28,7 @@ migrated based on migration criteria.`,
 	}
 
 	rootCmd.PersistentFlags().StringArrayVarP(&workflowFiles, "file", "f", []string{}, "Specify workflow file(s) to process. If not specified, all files in .github/workflows/*.yml are processed. Can be specified multiple times (e.g., -f .github/workflows/ci.yml -f .github/workflows/test.yml)")
+	rootCmd.PersistentFlags().BoolVar(&skipDuration, "skip-duration", false, "Skip fetching job execution durations from GitHub API to avoid unnecessary API calls")
 
 	fixCmd := &cobra.Command{
 		Use:   "fix",
@@ -39,7 +43,7 @@ all migration criteria.`,
 }
 
 func runScan(cmd *cobra.Command, args []string) {
-	candidates, err := scan.Scan(workflowFiles...)
+	candidates, err := scan.Scan(skipDuration, workflowFiles...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -76,7 +80,7 @@ func runScan(cmd *cobra.Command, args []string) {
 }
 
 func runFix(cmd *cobra.Command, args []string) {
-	candidates, err := scan.Scan(workflowFiles...)
+	candidates, err := scan.Scan(skipDuration, workflowFiles...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
