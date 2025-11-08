@@ -12,17 +12,19 @@ import (
 
 // Candidate represents a job that is eligible for migration
 type Candidate struct {
-	WorkflowPath string
-	JobName      string
-	LineNumber   int
-	Duration     string // Will be populated from GitHub API later
+	WorkflowPath    string
+	JobName         string
+	LineNumber      int
+	Duration        string // Will be populated from GitHub API later
+	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
 }
 
 // Scan scans workflows and returns migration candidates
 // If paths are provided, only those files are scanned. Otherwise, all workflow files
 // in .github/workflows are scanned.
 // skipDuration, if true, skips fetching job execution durations from GitHub API.
-func Scan(skipDuration bool, paths ...string) ([]*Candidate, error) {
+// verbose, if true, enables verbose output including debug warnings.
+func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error) {
 	var workflows []*workflow.Workflow
 	var err error
 
@@ -55,10 +57,13 @@ func Scan(skipDuration bool, paths ...string) ([]*Candidate, error) {
 		for jobName, job := range wf.Jobs {
 			// Check migration criteria
 			if isEligible(job) {
+				// Check for missing commands and include in candidate
+				missingCommands := job.GetMissingCommands()
 				candidates = append(candidates, &Candidate{
-					WorkflowPath: wf.Path,
-					JobName:      jobName,
-					LineNumber:   job.LineStart,
+					WorkflowPath:    wf.Path,
+					JobName:         jobName,
+					LineNumber:      job.LineStart,
+					MissingCommands: missingCommands,
 				})
 			}
 		}
@@ -66,9 +71,11 @@ func Scan(skipDuration bool, paths ...string) ([]*Candidate, error) {
 
 	// Fetch duration from GitHub API for each candidate (unless skipped)
 	if !skipDuration {
-		if err := fetchDurations(candidates); err != nil {
+		if err := fetchDurations(candidates, verbose); err != nil {
 			// Log error but don't fail the scan
-			fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
+			}
 		}
 	}
 
@@ -116,7 +123,8 @@ func isEligible(job *workflow.Job) bool {
 }
 
 // fetchDurations fetches job execution durations from GitHub API
-func fetchDurations(candidates []*Candidate) error {
+// verbose, if true, enables verbose output including debug warnings.
+func fetchDurations(candidates []*Candidate, verbose bool) error {
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -140,7 +148,9 @@ func fetchDurations(candidates []*Candidate) error {
 		duration, err := client.GetJobDuration(ctx, candidate.WorkflowPath, candidate.JobName)
 		if err != nil {
 			// Log error for debugging but continue to next candidate
-			fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s in %s: %v\n", candidate.JobName, candidate.WorkflowPath, err)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s in %s: %v\n", candidate.JobName, candidate.WorkflowPath, err)
+			}
 			continue
 		}
 

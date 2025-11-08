@@ -1,6 +1,9 @@
 package workflow
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -663,6 +666,246 @@ func TestJob_CombinedChecks(t *testing.T) {
 				t.Errorf("HasContainer() = %v, want %v", got, tt.wantContainer)
 			}
 		})
+	}
+}
+
+func TestJob_GetMissingCommands(t *testing.T) {
+	tests := []struct {
+		name            string
+		job             *Job
+		expectedMissing []string
+	}{
+		{
+			name: "job with missing command",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "docker ps"},
+				},
+			},
+			expectedMissing: []string{"docker"},
+		},
+		{
+			name: "job with multiple missing commands",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "docker ps"},
+					{Run: "lsof -i :8080"},
+				},
+			},
+			expectedMissing: []string{"docker", "lsof"},
+		},
+		{
+			name: "non-ubuntu-latest runner",
+			job: &Job{
+				RunsOn: "ubuntu-22.04",
+				Steps: []Step{
+					{Run: "docker ps"},
+				},
+			},
+			expectedMissing: nil,
+		},
+		{
+			name: "job with comment",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "# This is a comment\ndocker ps"},
+				},
+			},
+			expectedMissing: []string{"docker"},
+		},
+		{
+			name: "job with variable assignment",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "VAR=value docker ps"},
+				},
+			},
+			expectedMissing: []string{"docker"},
+		},
+		{
+			name: "job with sudo",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "sudo docker ps"},
+				},
+			},
+			expectedMissing: []string{"docker"},
+		},
+		{
+			name: "job with pipe",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "docker ps | grep running"},
+				},
+			},
+			expectedMissing: []string{"docker"},
+		},
+		{
+			name: "job with command that exists in slim",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: "echo hello"},
+				},
+			},
+			expectedMissing: nil,
+		},
+		{
+			name: "job with multi-line script",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Run: `#!/bin/bash
+set -e
+docker ps
+lsof -i :8080`},
+				},
+			},
+			expectedMissing: []string{"docker", "lsof"},
+		},
+		{
+			name: "job with empty steps",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{},
+			},
+			expectedMissing: nil,
+		},
+		{
+			name: "job with step without run",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []Step{
+					{Uses: "actions/checkout@v4"},
+				},
+			},
+			expectedMissing: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.job.GetMissingCommands()
+
+			// Check length
+			if len(got) != len(tt.expectedMissing) {
+				t.Errorf("GetMissingCommands() returned %d commands, want %d: got=%v, want=%v",
+					len(got), len(tt.expectedMissing), got, tt.expectedMissing)
+				return
+			}
+
+			// Check contents (order may vary)
+			gotMap := make(map[string]bool)
+			for _, cmd := range got {
+				gotMap[cmd] = true
+			}
+
+			for _, expected := range tt.expectedMissing {
+				if !gotMap[expected] {
+					t.Errorf("GetMissingCommands() missing expected command: %s, got=%v", expected, got)
+				}
+			}
+		})
+	}
+}
+
+// TestJob_GetMissingCommands_RealWorkflows tests GetMissingCommands with actual workflow files
+// from .github/workflows directory. This ensures the function works correctly with real-world examples.
+func TestJob_GetMissingCommands_RealWorkflows(t *testing.T) {
+	// Get the workspace root directory
+	// This test assumes it's run from the repository root
+	workspaceRoot := findWorkspaceRoot(t)
+	workflowDir := filepath.Join(workspaceRoot, ".github", "workflows")
+
+	// Check if .github/workflows directory exists
+	if _, err := os.Stat(workflowDir); os.IsNotExist(err) {
+		t.Skipf("Skipping test: .github/workflows directory not found at %s", workflowDir)
+	}
+
+	// Save original working directory
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	// Change to workspace root directory
+	if err := os.Chdir(workspaceRoot); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		os.Chdir(originalWd)
+	}()
+
+	// Load all workflow files
+	workflows, err := LoadWorkflows()
+	if err != nil {
+		t.Fatalf("Failed to load workflows: %v", err)
+	}
+
+	if len(workflows) == 0 {
+		t.Skip("Skipping test: no workflow files found")
+	}
+
+	// Test each workflow
+	for _, wf := range workflows {
+		t.Run(filepath.Base(wf.Path), func(t *testing.T) {
+			for jobName, job := range wf.Jobs {
+				t.Run(jobName, func(t *testing.T) {
+					missingCommands := job.GetMissingCommands()
+
+					// Log the results for debugging
+					if len(missingCommands) > 0 {
+						t.Logf("Job '%s' in %s uses missing commands: %v", jobName, wf.Path, missingCommands)
+					}
+
+					// Verify that if job is ubuntu-latest, GetMissingCommands returns results
+					// (may be empty if no missing commands are used)
+					if job.IsUbuntuLatest() {
+						// This is fine - the function should work without errors
+						// The actual commands depend on what's in the workflow
+						_ = missingCommands
+					} else {
+						// For non-ubuntu-latest jobs, should return nil
+						if missingCommands != nil {
+							t.Errorf("GetMissingCommands() should return nil for non-ubuntu-latest job, got %v", missingCommands)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// findWorkspaceRoot finds the workspace root directory by looking for go.mod
+func findWorkspaceRoot(t *testing.T) string {
+	t.Helper()
+	// Get the directory of this test file
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("Failed to get caller information")
+	}
+	currentDir := filepath.Dir(testFile)
+
+	// Walk up the directory tree to find go.mod
+	dir := currentDir
+	for {
+		goModPath := filepath.Join(dir, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached root directory
+			t.Fatalf("Failed to find workspace root (go.mod not found)")
+		}
+		dir = parent
 	}
 }
 
