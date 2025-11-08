@@ -105,7 +105,7 @@ func runFix(cmd *cobra.Command, args []string) {
 
 	// Update each workflow file
 	for workflowPath, jobs := range workflowMap {
-		fmt.Printf("Updating %s...\n", workflowPath)
+		fmt.Printf("Updating %s\n", workflowPath)
 		for _, job := range jobs {
 			// Reload workflow to get current state
 			wf, err := workflow.LoadWorkflow(workflowPath)
