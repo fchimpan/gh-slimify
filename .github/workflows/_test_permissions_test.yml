@@ -26,7 +26,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Display permissions
         run: |
@@ -46,7 +46,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       
       - name: Test write permissions
         run: echo "Write permission test completed"
