@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/fchimpan/gh-slimify/internal/scan"
+	"github.com/fchimpan/gh-slimify/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -71,9 +72,66 @@ func runScan(cmd *cobra.Command, args []string) {
 }
 
 func runFix(cmd *cobra.Command, args []string) {
+	candidates, err := scan.Scan()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(candidates) == 0 {
+		fmt.Println("No jobs found that can be safely migrated to ubuntu-slim.")
+		return
+	}
+
 	fmt.Println("Updating workflows to use ubuntu-slim...")
-	// TODO: Implement workflow fixing logic
-	fmt.Println("(Fix functionality will be implemented)")
+	fmt.Println()
+
+	// Group candidates by workflow file
+	workflowMap := make(map[string][]*scan.Candidate)
+	for _, c := range candidates {
+		workflowMap[c.WorkflowPath] = append(workflowMap[c.WorkflowPath], c)
+	}
+
+	updatedCount := 0
+	errorCount := 0
+
+	// Update each workflow file
+	for workflowPath, jobs := range workflowMap {
+		fmt.Printf("Updating %s...\n", workflowPath)
+		for _, job := range jobs {
+			// Reload workflow to get current state
+			wf, err := workflow.LoadWorkflow(workflowPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  Error loading workflow %s: %v\n", workflowPath, err)
+				errorCount++
+				continue
+			}
+
+			// Verify job still exists and is eligible
+			if _, ok := wf.Jobs[job.JobName]; !ok {
+				fmt.Fprintf(os.Stderr, "  Warning: job %s not found in %s\n", job.JobName, workflowPath)
+				continue
+			}
+
+			// Update runs-on value
+			if err := workflow.UpdateRunsOn(workflowPath, job.JobName, "ubuntu-slim"); err != nil {
+				fmt.Fprintf(os.Stderr, "  Error updating job %s in %s: %v\n", job.JobName, workflowPath, err)
+				errorCount++
+				continue
+			}
+
+			fmt.Printf("  ✓ Updated job \"%s\" (L%d) → ubuntu-slim\n", job.JobName, job.LineNumber)
+			updatedCount++
+		}
+		fmt.Println()
+	}
+
+	// Summary
+	fmt.Printf("Successfully updated %d job(s) to use ubuntu-slim.\n", updatedCount)
+	if errorCount > 0 {
+		fmt.Fprintf(os.Stderr, "Encountered %d error(s) during update.\n", errorCount)
+		os.Exit(1)
+	}
 }
 
 // formatLocalLink formats a local file link with line number

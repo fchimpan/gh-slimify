@@ -166,3 +166,99 @@ func findRunsOnLineNumber(lines []string, jobName string) int {
 
 	return 0
 }
+
+// UpdateRunsOn updates the runs-on value for a specific job in a workflow file
+// It preserves the original file formatting by doing line-by-line replacement
+func UpdateRunsOn(filePath string, jobName string, newRunsOn string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	updated := false
+	inJobsSection := false
+	inTargetJob := false
+	indentLevel := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check if we're in jobs section
+		if trimmed == "jobs:" {
+			inJobsSection = true
+			continue
+		}
+
+		if !inJobsSection {
+			continue
+		}
+
+		// Calculate indentation level
+		lineIndent := 0
+		for _, char := range line {
+			switch char {
+			case ' ':
+				lineIndent++
+			case '\t':
+				lineIndent += 4 // Treat tab as 4 spaces
+			default:
+				// Not a space or tab, stop counting
+			}
+		}
+
+		// Check if we've left the jobs section
+		if inJobsSection && lineIndent == 0 && trimmed != "" && !strings.HasSuffix(trimmed, ":") {
+			break
+		}
+
+		// Check if this is the target job name
+		if inJobsSection && strings.HasPrefix(trimmed, jobName+":") {
+			inTargetJob = true
+			indentLevel = lineIndent
+			continue
+		}
+
+		// If we're in the target job, look for runs-on
+		if inTargetJob {
+			// Check if we've left this job
+			if lineIndent <= indentLevel && trimmed != "" && !strings.HasPrefix(trimmed, " ") {
+				break
+			}
+
+			// Look for runs-on line and replace ubuntu-latest with new value
+			if strings.Contains(trimmed, "runs-on:") {
+				// Handle both "runs-on: ubuntu-latest" and "runs-on:ubuntu-latest" formats
+				if strings.Contains(trimmed, "ubuntu-latest") {
+					// Extract original indentation from the line (preserve exact whitespace)
+					originalIndent := ""
+					for j := 0; j < len(line); j++ {
+						char := line[j]
+						if char == ' ' || char == '\t' {
+							originalIndent += string(char)
+						} else {
+							break
+						}
+					}
+					// Replace the value while preserving original indentation and format
+					// Use the exact same format as the original line
+					lines[i] = originalIndent + "runs-on: " + newRunsOn
+					updated = true
+					break
+				}
+			}
+		}
+	}
+
+	if !updated {
+		return fmt.Errorf("failed to find runs-on for job %s in %s", jobName, filePath)
+	}
+
+	// Write updated content back to file
+	updatedContent := strings.Join(lines, "\n")
+	if err := os.WriteFile(filePath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", filePath, err)
+	}
+
+	return nil
+}

@@ -327,6 +327,229 @@ func TestLoadWorkflows_InvalidFile(t *testing.T) {
 	}
 }
 
+func TestUpdateRunsOn_Basic(t *testing.T) {
+	tests := []struct {
+		name      string
+		filename  string
+		jobName   string
+		newRunsOn string
+		wantErr   bool
+		verify    func(t *testing.T, filePath string)
+	}{
+		{
+			name:      "single job update",
+			filename:  "single-job.yml",
+			jobName:   "test",
+			newRunsOn: "ubuntu-slim",
+			wantErr:   false,
+			verify: func(t *testing.T, filePath string) {
+				data, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatalf("Failed to read updated file: %v", err)
+				}
+				content := string(data)
+				if !strings.Contains(content, "runs-on: ubuntu-slim") {
+					t.Errorf("Updated file should contain 'runs-on: ubuntu-slim', got:\n%s", content)
+				}
+				if strings.Contains(content, "runs-on: ubuntu-latest") {
+					t.Errorf("Updated file should not contain 'runs-on: ubuntu-latest'")
+				}
+			},
+		},
+		{
+			name:      "multiple jobs update specific job",
+			filename:  "multiple-jobs.yml",
+			jobName:   "job1",
+			newRunsOn: "ubuntu-slim",
+			wantErr:   false,
+			verify: func(t *testing.T, filePath string) {
+				data, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatalf("Failed to read updated file: %v", err)
+				}
+				content := string(data)
+				lines := strings.Split(content, "\n")
+				foundJob1 := false
+				foundJob2 := false
+				for i, line := range lines {
+					if strings.Contains(line, "job1:") {
+						// Check next few lines for runs-on
+						for j := i + 1; j < len(lines) && j < i+5; j++ {
+							if strings.Contains(lines[j], "runs-on:") {
+								if strings.Contains(lines[j], "ubuntu-slim") {
+									foundJob1 = true
+								}
+								break
+							}
+						}
+					}
+					if strings.Contains(line, "job2:") {
+						// Check next few lines for runs-on
+						for j := i + 1; j < len(lines) && j < i+5; j++ {
+							if strings.Contains(lines[j], "runs-on:") {
+								if strings.Contains(lines[j], "ubuntu-22.04") {
+									foundJob2 = true
+								}
+								break
+							}
+						}
+					}
+				}
+				if !foundJob1 {
+					t.Error("job1 should have runs-on: ubuntu-slim")
+				}
+				if !foundJob2 {
+					t.Error("job2 should still have runs-on: ubuntu-22.04")
+				}
+			},
+		},
+		{
+			name:      "preserve indentation matching steps",
+			filename:  "single-job.yml",
+			jobName:   "test",
+			newRunsOn: "ubuntu-slim",
+			wantErr:   false,
+			verify: func(t *testing.T, filePath string) {
+				data, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatalf("Failed to read updated file: %v", err)
+				}
+				content := string(data)
+				lines := strings.Split(content, "\n")
+				
+				// Find runs-on and steps lines and verify they have the same indentation
+				var runsOnLine string
+				var stepsLine string
+				for _, line := range lines {
+					if strings.Contains(line, "runs-on:") {
+						runsOnLine = line
+					}
+					if strings.Contains(line, "steps:") {
+						stepsLine = line
+					}
+				}
+				
+				if runsOnLine == "" {
+					t.Fatal("runs-on line not found")
+				}
+				if stepsLine == "" {
+					t.Fatal("steps line not found")
+				}
+				
+				// Extract indentation (leading spaces/tabs)
+				runsOnIndent := ""
+				for _, char := range runsOnLine {
+					if char == ' ' || char == '\t' {
+						runsOnIndent += string(char)
+					} else {
+						break
+					}
+				}
+				
+				stepsIndent := ""
+				for _, char := range stepsLine {
+					if char == ' ' || char == '\t' {
+						stepsIndent += string(char)
+					} else {
+						break
+					}
+				}
+				
+				if runsOnIndent != stepsIndent {
+					t.Errorf("runs-on and steps should have the same indentation. runs-on: %q, steps: %q", runsOnIndent, stepsIndent)
+					t.Errorf("runs-on line: %q", runsOnLine)
+					t.Errorf("steps line: %q", stepsLine)
+				}
+			},
+		},
+		{
+			name:      "preserve exact indentation",
+			filename:  "single-job.yml",
+			jobName:   "test",
+			newRunsOn: "ubuntu-slim",
+			wantErr:   false,
+			verify: func(t *testing.T, filePath string) {
+				data, err := os.ReadFile(filePath)
+				if err != nil {
+					t.Fatalf("Failed to read updated file: %v", err)
+				}
+				content := string(data)
+				lines := strings.Split(content, "\n")
+				
+				// Find the runs-on line and verify it has correct indentation
+				for _, line := range lines {
+					if strings.Contains(line, "runs-on:") {
+						// Check that runs-on starts at the same column as other job properties
+						// It should not have leading spaces before the indentation
+						trimmed := strings.TrimLeft(line, " \t")
+						if !strings.HasPrefix(trimmed, "runs-on:") {
+							t.Errorf("runs-on line should start with 'runs-on:', got: %q", line)
+						}
+						// Verify no extra spaces before runs-on
+						if strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "    ") {
+							// Count leading spaces
+							leadingSpaces := 0
+							for _, char := range line {
+								if char == ' ' {
+									leadingSpaces++
+								} else {
+									break
+								}
+							}
+							// Should be 4 spaces (standard YAML indentation)
+							if leadingSpaces != 4 && leadingSpaces != 2 {
+								t.Errorf("runs-on should have 2 or 4 spaces indentation, got %d spaces: %q", leadingSpaces, line)
+							}
+						}
+						break
+					}
+				}
+			},
+		},
+		{
+			name:      "job not found",
+			filename:  "single-job.yml",
+			jobName:   "nonexistent",
+			newRunsOn: "ubuntu-slim",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Load testdata file
+			content := loadTestData(t, tt.filename)
+
+			// Create temporary file
+			tmpDir := t.TempDir()
+			filePath := filepath.Join(tmpDir, "workflow.yml")
+			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			// Update runs-on
+			err := UpdateRunsOn(filePath, tt.jobName, tt.newRunsOn)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("UpdateRunsOn() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("UpdateRunsOn() unexpected error: %v", err)
+				return
+			}
+
+			// Verify the update
+			if tt.verify != nil {
+				tt.verify(t, filePath)
+			}
+		})
+	}
+}
+
 func TestJob_IsUbuntuLatest(t *testing.T) {
 	tests := []struct {
 		name     string
