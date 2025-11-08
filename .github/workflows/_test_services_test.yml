@@ -1,0 +1,62 @@
+# This is a test workflow file for integration testing.
+# GitHub Actions is disabled for this workflow.
+name: Integration Test - Services_test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  database-test:
+    name: Database Integration Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Test PostgreSQL connection
+        run: |
+          echo "Testing PostgreSQL connection"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d testdb -c "SELECT version();" || echo "PostgreSQL test skipped"
+      
+      - name: Test Redis connection
+        run: |
+          echo "Testing Redis connection"
+          redis-cli -h localhost ping || echo "Redis test skipped"
+
+# Expected results when running 'gh slimfy':
+# - 0 candidate jobs detected
+#   - runs-on: ubuntu-latest ✓
+#   - No Docker commands ✓
+#   - No container actions ✓
+#   - Has services (postgres, redis) ✗ (disqualifies migration)
+#   - No container syntax ✓
+# - Output: "No jobs found that can be safely migrated to ubuntu-slim."
+

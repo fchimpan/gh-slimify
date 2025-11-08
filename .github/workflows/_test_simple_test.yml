@@ -1,0 +1,41 @@
+# This is a test workflow file for integration testing.
+# GitHub Actions is disabled for this workflow.
+name: Integration Test - Simple_test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  simple-test:
+    name: Simple Test Job
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      
+      - name: Run simple command
+        run: echo "Running simple integration test"
+      
+      - name: List files
+        run: ls -la
+
+# Expected results when running 'gh slimfy':
+# - 1 candidate job detected: simple-test
+#   - runs-on: ubuntu-latest ✓
+#   - No Docker commands ✓
+#   - No container actions ✓
+#   - No services ✓
+#   - No container syntax ✓
+# - Output: ".github/workflows/_test_simple_test.yml\n  - job \"simple-test\" (L17) → ubuntu-slim compatible"
+

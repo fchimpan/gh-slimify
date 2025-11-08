@@ -1,0 +1,57 @@
+# This is a test workflow file for integration testing.
+# GitHub Actions is disabled for this workflow.
+name: Integration Test - Permissions_test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  permission-test:
+    name: Permission Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Display permissions
+        run: |
+          echo "Job-level permissions applied"
+          echo "Contents: read"
+          echo "Issues: read"
+          echo "Pull Requests: read"
+      
+      - name: Test workflow
+        run: echo "Permission test completed"
+
+  write-permission-test:
+    name: Write Permission Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Test write permissions
+        run: echo "Write permission test completed"
+
+# Expected results when running 'gh slimfy':
+# - 2 candidate jobs detected: permission-test, write-permission-test
+#   - permission-test: runs-on: ubuntu-latest ✓, no Docker/containers/services ✓
+#   - write-permission-test: runs-on: ubuntu-latest ✓, no Docker/containers/services ✓
+# - Output: ".github/workflows/_test_permissions_test.yml\n  - job \"permission-test\" (L20) → ubuntu-slim compatible\n  - job \"write-permission-test\" (L41) → ubuntu-slim compatible\n\nTotal: 2 job(s) can be safely migrated."
+

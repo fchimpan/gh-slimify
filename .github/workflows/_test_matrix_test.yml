@@ -1,0 +1,63 @@
+# This is a test workflow file for integration testing.
+# GitHub Actions is disabled for this workflow.
+name: Integration Test - Matrix Strategy_test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        type: choice
+        options:
+          - unit
+          - integration
+          - e2e
+
+jobs:
+  matrix-test:
+    name: Matrix Test - ${{ matrix.os }} - ${{ matrix.go-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        go-version:
+          - '1.21'
+          - '1.22'
+        include:
+          - os: ubuntu-latest
+            go-version: '1.23'
+            test-suite: extended
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      
+      - name: Display matrix info
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          echo "Go Version: ${{ matrix.go-version }}"
+          echo "Test Suite: ${{ matrix.test-suite || 'default' }}"
+      
+      - name: Run tests
+        run: |
+          go version
+          echo "Running tests on ${{ matrix.os }}"
+
+# Expected results when running 'gh slimfy':
+# - 0 candidate jobs detected
+#   - runs-on: ${{ matrix.os }} (matrix variable, not literal "ubuntu-latest")
+#   - IsUbuntuLatest() returns false because runs-on is a matrix expression
+# - Output: "No jobs found that can be safely migrated to ubuntu-slim."
+
