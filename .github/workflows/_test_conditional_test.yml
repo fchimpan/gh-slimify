@@ -5,10 +5,10 @@ name: Integration Test - Conditional Execution_test
 on:
   push:
     branches:
-      - main
+      - 'never-run-this-workflow'
   pull_request:
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly on Sunday
+    branches:
+      - 'never-run-this-workflow'
 
 env:
   NODE_ENV: test

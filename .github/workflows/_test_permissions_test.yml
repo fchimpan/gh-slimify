@@ -5,8 +5,10 @@ name: Integration Test - Permissions_test
 on:
   push:
     branches:
-      - main
+      - 'never-run-this-workflow'
   pull_request:
+    branches:
+      - 'never-run-this-workflow'
 
 permissions:
   contents: read

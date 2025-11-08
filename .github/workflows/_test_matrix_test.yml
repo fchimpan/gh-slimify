@@ -5,7 +5,7 @@ name: Integration Test - Matrix Strategy_test
 on:
   push:
     branches:
-      - main
+      - 'never-run-this-workflow'
   workflow_dispatch:
     inputs:
       test_type:

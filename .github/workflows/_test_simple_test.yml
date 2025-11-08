@@ -5,11 +5,10 @@ name: Integration Test - Simple_test
 on:
   push:
     branches:
-      - main
-      - develop
+      - 'never-run-this-workflow'
   pull_request:
     branches:
-      - main
+      - 'never-run-this-workflow'
 
 jobs:
   simple-test:

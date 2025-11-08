@@ -5,16 +5,10 @@ name: Integration Test - Complex Workflow_test
 on:
   push:
     branches:
-      - main
-      - develop
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
+      - 'never-run-this-workflow'
   pull_request:
-    types: [opened, synchronize, reopened]
-  release:
-    types: [published]
+    branches:
+      - 'never-run-this-workflow'
   workflow_dispatch:
     inputs:
       environment:
