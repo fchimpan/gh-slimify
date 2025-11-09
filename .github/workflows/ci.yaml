@@ -63,5 +63,5 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             export EXT=".exe"
           fi
-          go build -v -o "gh-slimify-${{ matrix.goos }}-${{ matrix.goarch }}$EXT" ./cmd/slimly
+          go build -v -o "gh-slimify-${{ matrix.goos }}-${{ matrix.goarch }}$EXT" ./cmd/slimify
 

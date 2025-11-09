@@ -52,6 +52,7 @@ gh extension install fchimpan/gh-slimify
 >    # List jobs from that run to inspect start/completion times
 >    gh api \
 >      repos/{owner}/{repo}/actions/runs/${id}/jobs | jq '.jobs[] | {name: .name, started_at: .started_at, completed_at: .completed_at}'
+
 > 
 > Based on these rules, review each workflow and migrate every eligible job to ubuntu-slim. Afterward, report both the jobs that were successfully migrated and, for those that were not, the specific reasons they were ineligible.
 > ```
@@ -67,7 +68,7 @@ gh extension install fchimpan/gh-slimify
 Get help:
 
 ```bash
-$ gh slimfy --help
+$ gh slimify --help
 ```
 
 ### Scan Workflows
@@ -75,19 +76,19 @@ $ gh slimfy --help
 Scan specific workflow file(s) to find migration candidates:
 
 ```bash
-gh slimfy .github/workflows/ci.yml
+gh slimify .github/workflows/ci.yml
 ```
 
 Or scan multiple workflow files:
 
 ```bash
-gh slimfy .github/workflows/ci.yml .github/workflows/test.yml
+gh slimify .github/workflows/ci.yml .github/workflows/test.yml
 ```
 
 To scan all workflows in `.github/workflows/`, use the `--all` flag:
 
 ```bash
-gh slimfy --all
+gh slimify --all
 ```
 
 **Example Output:**
@@ -129,13 +130,13 @@ Automatically update eligible jobs to use `ubuntu-slim`. By default, only safe j
 Specify workflow file(s):
 
 ```bash
-gh slimfy fix .github/workflows/ci.yml
+gh slimify fix .github/workflows/ci.yml
 ```
 
 Or use `--all` to fix all workflows:
 
 ```bash
-gh slimfy fix --all
+gh slimify fix --all
 ```
 
 **Example Output (default - safe jobs only):**
@@ -153,7 +154,7 @@ Successfully updated 1 job(s) to use ubuntu-slim.
 To also update jobs with warnings (missing commands or unknown execution time), use the `--force` flag:
 
 ```bash
-gh slimfy fix --force
+gh slimify fix --force
 ```
 
 **Example Output (with --force):**
@@ -175,7 +176,7 @@ Successfully updated 2 job(s) to use ubuntu-slim.
 To scan all workflows in `.github/workflows/`, use the `--all` flag:
 
 ```bash
-gh slimfy --all
+gh slimify --all
 ```
 
 ### Using --file Flag
@@ -183,7 +184,7 @@ gh slimfy --all
 You can also use the `--file` (or `-f`) flag to specify workflow files:
 
 ```bash
-gh slimfy -f .github/workflows/ci.yml -f .github/workflows/test.yml
+gh slimify -f .github/workflows/ci.yml -f .github/workflows/test.yml
 ```
 
 ### Skip Duration Check
@@ -194,13 +195,13 @@ Skip fetching job durations from GitHub API. This is useful for:
 - **When API access is unavailable**: Use when GitHub API is not accessible
 
 ```bash
-gh slimfy --skip-duration
+gh slimify --skip-duration
 ```
 
 Use the `--verbose` flag to enable debug output, which can help troubleshoot issues with API calls or workflow parsing:
 
 ```bash
-gh slimfy --verbose
+gh slimify --verbose
 ```
 
 ### Force Update Jobs with Warnings
@@ -208,15 +209,15 @@ gh slimfy --verbose
 Update jobs with warnings (missing commands or unknown execution time):
 
 ```bash
-gh slimfy fix --force
+gh slimify fix --force
 ```
 
 ### Combine Options
 
 ```bash
-gh slimfy fix .github/workflows/ci.yml --skip-duration --force
-gh slimfy --all --skip-duration
-gh slimfy fix --all --force
+gh slimify fix .github/workflows/ci.yml --skip-duration --force
+gh slimify --all --skip-duration
+gh slimify fix --all --force
 ```
 
 ## 🔍 Migration Criteria

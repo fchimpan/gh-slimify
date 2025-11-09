@@ -20,9 +20,9 @@ var (
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "slimfy [flags] [workflow-file...]",
+		Use:   "slimify [flags] [workflow-file...]",
 		Short: "Scan GitHub Actions workflows for ubuntu-slim migration candidates",
-		Long: `slimfy is a GitHub CLI extension that automatically detects and safely migrates
+		Long: `slimify is a GitHub CLI extension that automatically detects and safely migrates
 eligible ubuntu-latest jobs to ubuntu-slim.
 
 By default, you must specify workflow file(s) to process. Use --all to scan all
@@ -64,8 +64,8 @@ func runScan(cmd *cobra.Command, args []string) {
 	// Otherwise, require at least one file to be specified
 	if !scanAll && len(files) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no workflow files specified. Use --all to scan all workflows, or specify workflow file(s) as arguments or with --file flag.\n")
-		fmt.Fprintf(os.Stderr, "Example: gh slimfy .github/workflows/ci.yml\n")
-		fmt.Fprintf(os.Stderr, "Example: gh slimfy --all\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimify .github/workflows/ci.yml\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimify --all\n")
 		os.Exit(1)
 	}
 
@@ -256,8 +256,8 @@ func runFix(cmd *cobra.Command, args []string) {
 	// Otherwise, require at least one file to be specified
 	if !scanAll && len(files) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no workflow files specified. Use --all to scan all workflows, or specify workflow file(s) as arguments or with --file flag.\n")
-		fmt.Fprintf(os.Stderr, "Example: gh slimfy fix .github/workflows/ci.yml\n")
-		fmt.Fprintf(os.Stderr, "Example: gh slimfy fix --all\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimify fix .github/workflows/ci.yml\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimify fix --all\n")
 		os.Exit(1)
 	}
 
