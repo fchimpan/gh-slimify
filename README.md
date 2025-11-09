@@ -40,10 +40,22 @@ $ gh slimfy --help
 
 ### Scan Workflows
 
-Scan all workflows in `.github/workflows/` to find migration candidates:
+Scan specific workflow file(s) to find migration candidates:
 
 ```bash
-gh slimfy
+gh slimfy .github/workflows/ci.yml
+```
+
+Or scan multiple workflow files:
+
+```bash
+gh slimfy .github/workflows/ci.yml .github/workflows/test.yml
+```
+
+To scan all workflows in `.github/workflows/`, use the `--all` flag:
+
+```bash
+gh slimfy --all
 ```
 
 **Example Output:**
@@ -71,10 +83,18 @@ The output shows:
 
 ### Auto-Fix Workflows
 
-Automatically update eligible jobs to use `ubuntu-slim`. By default, only safe jobs (no missing commands and known execution time) are updated:
+Automatically update eligible jobs to use `ubuntu-slim`. By default, only safe jobs (no missing commands and known execution time) are updated.
+
+Specify workflow file(s):
 
 ```bash
-gh slimfy fix
+gh slimfy fix .github/workflows/ci.yml
+```
+
+Or use `--all` to fix all workflows:
+
+```bash
+gh slimfy fix --all
 ```
 
 **Example Output (default - safe jobs only):**
@@ -109,9 +129,17 @@ Successfully updated 2 job(s) to use ubuntu-slim.
 
 ## 📖 Usage
 
-### Scan Specific Workflows
+### Scan All Workflows
 
-Scan only specific workflow files:
+To scan all workflows in `.github/workflows/`, use the `--all` flag:
+
+```bash
+gh slimfy --all
+```
+
+### Using --file Flag
+
+You can also use the `--file` (or `-f`) flag to specify workflow files:
 
 ```bash
 gh slimfy -f .github/workflows/ci.yml -f .github/workflows/test.yml
@@ -145,7 +173,9 @@ gh slimfy fix --force
 ### Combine Options
 
 ```bash
-gh slimfy fix -f .github/workflows/ci.yml --skip-duration --force
+gh slimfy fix .github/workflows/ci.yml --skip-duration --force
+gh slimfy --all --skip-duration
+gh slimfy fix --all --force
 ```
 
 ## 🔍 Migration Criteria

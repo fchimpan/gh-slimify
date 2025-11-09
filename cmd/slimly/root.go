@@ -12,6 +12,7 @@ import (
 
 var (
 	workflowFiles []string
+	scanAll       bool
 	skipDuration  bool
 	verbose       bool
 	force         bool
@@ -19,27 +20,33 @@ var (
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "slimfy",
+		Use:   "slimfy [flags] [workflow-file...]",
 		Short: "Scan GitHub Actions workflows for ubuntu-slim migration candidates",
 		Long: `slimfy is a GitHub CLI extension that automatically detects and safely migrates
 eligible ubuntu-latest jobs to ubuntu-slim.
 
-It analyzes .github/workflows/*.yml files and identifies jobs that can be safely
-migrated based on migration criteria.`,
+By default, you must specify workflow file(s) to process. Use --all to scan all
+workflows in .github/workflows/*.yml.`,
 		Run: runScan,
+		Args: cobra.ArbitraryArgs,
 	}
 
-	rootCmd.PersistentFlags().StringArrayVarP(&workflowFiles, "file", "f", []string{}, "Specify workflow file(s) to process. If not specified, all files in .github/workflows/*.yml are processed. Can be specified multiple times (e.g., -f .github/workflows/ci.yml -f .github/workflows/test.yml)")
+	rootCmd.PersistentFlags().StringArrayVarP(&workflowFiles, "file", "f", []string{}, "Specify workflow file(s) to process. Can be specified multiple times (e.g., -f .github/workflows/ci.yml -f .github/workflows/test.yml)")
+	rootCmd.PersistentFlags().BoolVar(&scanAll, "all", false, "Scan all workflow files in .github/workflows/*.yml")
 	rootCmd.PersistentFlags().BoolVar(&skipDuration, "skip-duration", false, "Skip fetching job execution durations from GitHub API to avoid unnecessary API calls")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output including debug warnings")
 
 	fixCmd := &cobra.Command{
-		Use:   "fix",
+		Use:   "fix [flags] [workflow-file...]",
 		Short: "Automatically update workflows to use ubuntu-slim",
 		Long: `Replace runs-on: ubuntu-latest with ubuntu-slim for safe jobs that meet
 all migration criteria. By default, only safe jobs (no missing commands and known execution time)
-are updated. Use --force to also update jobs with warnings.`,
+are updated. Use --force to also update jobs with warnings.
+
+By default, you must specify workflow file(s) to process. Use --all to scan all
+workflows in .github/workflows/*.yml.`,
 		Run: runFix,
+		Args: cobra.ArbitraryArgs,
 	}
 	fixCmd.Flags().BoolVar(&force, "force", false, "Also update jobs with warnings (missing commands or unknown execution time)")
 
@@ -48,7 +55,29 @@ are updated. Use --force to also update jobs with warnings.`,
 }
 
 func runScan(cmd *cobra.Command, args []string) {
-	candidates, err := scan.Scan(skipDuration, verbose, workflowFiles...)
+	// Collect workflow files from args and --file flag
+	var files []string
+	files = append(files, args...)
+	files = append(files, workflowFiles...)
+
+	// If --all is specified, use empty slice to scan all workflows
+	// Otherwise, require at least one file to be specified
+	if !scanAll && len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no workflow files specified. Use --all to scan all workflows, or specify workflow file(s) as arguments or with --file flag.\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimfy .github/workflows/ci.yml\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimfy --all\n")
+		os.Exit(1)
+	}
+
+	var filesToScan []string
+	if scanAll {
+		// Pass empty slice to scan all workflows
+		filesToScan = []string{}
+	} else {
+		filesToScan = files
+	}
+
+	candidates, err := scan.Scan(skipDuration, verbose, filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -176,7 +205,29 @@ func runScan(cmd *cobra.Command, args []string) {
 }
 
 func runFix(cmd *cobra.Command, args []string) {
-	candidates, err := scan.Scan(skipDuration, verbose, workflowFiles...)
+	// Collect workflow files from args and --file flag
+	var files []string
+	files = append(files, args...)
+	files = append(files, workflowFiles...)
+
+	// If --all is specified, use empty slice to scan all workflows
+	// Otherwise, require at least one file to be specified
+	if !scanAll && len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no workflow files specified. Use --all to scan all workflows, or specify workflow file(s) as arguments or with --file flag.\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimfy fix .github/workflows/ci.yml\n")
+		fmt.Fprintf(os.Stderr, "Example: gh slimfy fix --all\n")
+		os.Exit(1)
+	}
+
+	var filesToScan []string
+	if scanAll {
+		// Pass empty slice to scan all workflows
+		filesToScan = []string{}
+	} else {
+		filesToScan = files
+	}
+
+	candidates, err := scan.Scan(skipDuration, verbose, filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
