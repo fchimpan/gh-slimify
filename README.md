@@ -8,8 +8,6 @@
 >`ubuntu-slim` is currently in **public preview** and may change before general availability. 
 >Please review GitHub's official documentation for the latest updates and breaking changes.
 
-> [!NOTE]
-> At the time of writing, GitHub has not officially published a list of tools pre-installed on `ubuntu-slim` runners. Therefore, the tool detection for missing commands is **uncertain** and based on assumptions. The tool may incorrectly flag commands as missing (false positives) or miss commands that are actually missing (false negatives). Always verify manually before migrating critical workflows.
 
 ## 🎯 Motivation
 
@@ -29,6 +27,37 @@ Install as a GitHub CLI extension:
 ```bash
 gh extension install fchimpan/gh-slimify
 ```
+
+> [!TIP] 
+> 💡 Wait, couldn't you just copy-paste the following prompt into AI agent and skip using this tool altogether? 🤔😏 *Spoiler alert: You'll be back.*
+> ```md
+> Goal: For every workflow file under `.github/workflows`, migrate jobs that currently run on `ubuntu-latest` to the container-based runner `ubuntu-slim`. Use the following decision rules in order when judging whether to migrate a job:
+> 
+> 1. Only consider jobs (including matrix entries) whose `runs-on` is `ubuntu-latest` or `ubuntu-24.04`.
+> 2. Skip any job that uses service containers (`jobs.<job_id>.services`).
+> 3. Skip any job already running inside a container (`jobs.<job_id>.container`).
+> 4. Skip any job whose setup steps provision an environment that assumes a non-container host.
+> 5. Skip any job whose run scripts rely on host-only commands or elevated system privileges that containers cannot provide (e.g., `systemctl`, `systemd`, etc.).
+> 6. Skip any job whose execution time exceeds 15 minutes. Use the GitHub CLI to check the duration of the most recent successful run. Example commands:
+> 
+>    ```bash
+>    # Get the database ID of the latest successful run
+>    id=$(gh run list \
+>      --repo ${owner}/${repo} \
+>      --workflow ${workflow_file_name} \
+>      --status success \
+>      --limit 1 \
+>      --json databaseId | jq .'[0].databaseId')
+> 
+>    # List jobs from that run to inspect start/completion times
+>    gh api \
+>      repos/{owner}/{repo}/actions/runs/${id}/jobs | jq '.jobs[] | {name: .name, started_at: .started_at, completed_at: .completed_at}'
+> 
+> Based on these rules, review each workflow and migrate every eligible job to ubuntu-slim. Afterward, report both the jobs that were successfully migrated and, for those that were not, the specific reasons they were ineligible.
+> ```
+
+> [!NOTE]
+> At the time of writing, GitHub has not officially published a list of tools pre-installed on `ubuntu-slim` runners. Therefore, the tool detection for missing commands is **uncertain** and based on assumptions. The tool may incorrectly flag commands as missing (false positives) or miss commands that are actually missing (false negatives). Always verify manually before migrating critical workflows.
 
 ## 🚀 Quick Start
 
@@ -72,15 +101,24 @@ gh slimfy --all
      • "build" (L15)
        ⚠️  Setup may be required (go), Last execution time: unknown
        .github/workflows/lint.yml:15
+  ❌ Cannot migrate (2 job(s)):
+     • "docker-build" (L25)
+       ❌ uses Docker commands
+       .github/workflows/lint.yml:25
+     • "test-with-db" (L35)
+       ❌ uses service containers
+       .github/workflows/lint.yml:35
 
 ✅ 1 job(s) can be safely migrated
 ⚠️  1 job(s) can be migrated but require attention
+❌ 2 job(s) cannot be migrated
 📊 Total: 2 job(s) eligible for migration
 ```
 
 The output shows:
 - **✅ Safe to migrate**: Jobs with no missing commands and known execution time
 - **⚠️ Can migrate but requires attention**: Jobs with missing commands or unknown execution time
+- **❌ Cannot migrate**: Jobs that cannot be migrated with specific reasons (e.g., uses Docker commands, uses service containers, uses container syntax, does not run on ubuntu-latest)
 - **Warning reasons**: Displayed in a single line for easy understanding
 - **Relative file paths**: Clickable links that work in VS Code, iTerm2, and other terminal emulators
 
@@ -200,12 +238,20 @@ If any condition is violated, the job will **not** be migrated.
 
 ### Job Status Classification
 
-Jobs are classified into two categories:
+Jobs are classified into three categories:
 
 - **✅ Safe to migrate**: No missing commands and execution time is known
 - **⚠️ Can migrate but requires attention**: Has missing commands or execution time is unknown
+- **❌ Cannot migrate**: Does not meet migration criteria (e.g., uses Docker commands, uses service containers, uses container syntax, does not run on ubuntu-latest)
 
 Missing commands are tools that exist in `ubuntu-latest` but need to be installed in `ubuntu-slim` (e.g., `nvm`). These jobs can still be migrated, but you may need to add setup steps to install the required tools.
+
+When a job cannot be migrated, the specific reason(s) are displayed, such as:
+- "does not run on ubuntu-latest"
+- "uses Docker commands"
+- "uses container-based GitHub Actions"
+- "uses service containers"
+- "uses container syntax"
 
 ## 📝 Examples
 
@@ -271,9 +317,10 @@ jobs:
 2. **Check Criteria**: Evaluates each job against migration criteria (Docker, services, containers)
 3. **Detect Missing Commands**: Identifies commands used in jobs that exist in `ubuntu-latest` but not in `ubuntu-slim`
 4. **Fetch Durations**: Retrieves latest job execution times from GitHub API (unless `--skip-duration` is used)
-5. **Classify Jobs**: Separates jobs into "safe" (no warnings) and "requires attention" (has warnings) categories
+5. **Classify Jobs**: Separates jobs into "safe" (no warnings), "requires attention" (has warnings), and "cannot migrate" (does not meet criteria) categories
 6. **Report Results**: Displays eligible jobs grouped by status with:
-   - Visual indicators (✅ for safe, ⚠️ for warnings)
+   - Visual indicators (✅ for safe, ⚠️ for warnings, ❌ for ineligible)
+   - Ineligibility reasons for jobs that cannot be migrated
    - Warning reasons in a single line
    - Relative file paths with line numbers (clickable in most terminals)
    - Execution durations
