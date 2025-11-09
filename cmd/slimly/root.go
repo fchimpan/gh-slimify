@@ -77,16 +77,14 @@ func runScan(cmd *cobra.Command, args []string) {
 		filesToScan = files
 	}
 
-	candidates, err := scan.Scan(skipDuration, verbose, filesToScan...)
+	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(candidates) == 0 {
-		fmt.Println("No jobs found that can be safely migrated to ubuntu-slim.")
-		return
-	}
+	candidates := result.Candidates
+	ineligibleJobs := result.IneligibleJobs
 
 	// Group candidates by workflow file
 	workflowMap := make(map[string][]*scan.Candidate)
@@ -94,9 +92,24 @@ func runScan(cmd *cobra.Command, args []string) {
 		workflowMap[c.WorkflowPath] = append(workflowMap[c.WorkflowPath], c)
 	}
 
+	// Group ineligible jobs by workflow file
+	ineligibleMap := make(map[string][]*scan.IneligibleJob)
+	for _, job := range ineligibleJobs {
+		ineligibleMap[job.WorkflowPath] = append(ineligibleMap[job.WorkflowPath], job)
+	}
+
 	// Display results grouped by workflow file
-	for workflowPath, jobs := range workflowMap {
+	allWorkflowPaths := make(map[string]bool)
+	for path := range workflowMap {
+		allWorkflowPaths[path] = true
+	}
+	for path := range ineligibleMap {
+		allWorkflowPaths[path] = true
+	}
+
+	for workflowPath := range allWorkflowPaths {
 		fmt.Printf("\n📄 %s\n", workflowPath)
+		jobs := workflowMap[workflowPath]
 
 		// Separate safe jobs and jobs with warnings
 		// Safe jobs: no missing commands AND execution time is known
@@ -172,6 +185,27 @@ func runScan(cmd *cobra.Command, args []string) {
 				fmt.Printf("       %s\n", jobLink)
 			}
 		}
+
+		// Display ineligible jobs
+		ineligibleJobsForWorkflow := ineligibleMap[workflowPath]
+		if len(ineligibleJobsForWorkflow) > 0 {
+			fmt.Printf("  ❌ Cannot migrate (%d job(s)):\n", len(ineligibleJobsForWorkflow))
+			for _, job := range ineligibleJobsForWorkflow {
+				jobLink := formatLocalLink(workflowPath, job.LineNumber)
+				reasonsStr := ""
+				if len(job.Reasons) > 0 {
+					reasonsStr = job.Reasons[0]
+					for i := 1; i < len(job.Reasons); i++ {
+						reasonsStr += ", " + job.Reasons[i]
+					}
+				}
+				fmt.Printf("     • \"%s\" (L%d)\n", job.JobName, job.LineNumber)
+				if reasonsStr != "" {
+					fmt.Printf("       ❌ %s\n", reasonsStr)
+				}
+				fmt.Printf("       %s\n", jobLink)
+			}
+		}
 	}
 
 	// Summary
@@ -201,7 +235,15 @@ func runScan(cmd *cobra.Command, args []string) {
 	if warningCount > 0 {
 		fmt.Printf("⚠️  %d job(s) can be migrated but require attention\n", warningCount)
 	}
-	fmt.Printf("📊 Total: %d job(s) eligible for migration\n", len(candidates))
+	if len(ineligibleJobs) > 0 {
+		fmt.Printf("❌ %d job(s) cannot be migrated\n", len(ineligibleJobs))
+	}
+	if len(candidates) > 0 {
+		fmt.Printf("📊 Total: %d job(s) eligible for migration\n", len(candidates))
+	}
+	if len(candidates) == 0 && len(ineligibleJobs) == 0 {
+		fmt.Println("No jobs found that can be safely migrated to ubuntu-slim.")
+	}
 }
 
 func runFix(cmd *cobra.Command, args []string) {
@@ -227,11 +269,13 @@ func runFix(cmd *cobra.Command, args []string) {
 		filesToScan = files
 	}
 
-	candidates, err := scan.Scan(skipDuration, verbose, filesToScan...)
+	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	candidates := result.Candidates
 
 	if len(candidates) == 0 {
 		fmt.Println("No jobs found that can be safely migrated to ubuntu-slim.")

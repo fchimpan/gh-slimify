@@ -19,12 +19,26 @@ type Candidate struct {
 	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
 }
 
-// Scan scans workflows and returns migration candidates
+// IneligibleJob represents a job that is not eligible for migration
+type IneligibleJob struct {
+	WorkflowPath string
+	JobName      string
+	LineNumber   int
+	Reasons      []string // Reasons why the job cannot be migrated
+}
+
+// ScanResult contains both eligible candidates and ineligible jobs
+type ScanResult struct {
+	Candidates     []*Candidate
+	IneligibleJobs []*IneligibleJob
+}
+
+// Scan scans workflows and returns migration candidates and ineligible jobs
 // If paths are provided, only those files are scanned. Otherwise, all workflow files
 // in .github/workflows are scanned.
 // skipDuration, if true, skips fetching job execution durations from GitHub API.
 // verbose, if true, enables verbose output including debug warnings.
-func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error) {
+func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error) {
 	var workflows []*workflow.Workflow
 	var err error
 
@@ -47,16 +61,21 @@ func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error
 
 		if len(workflows) == 0 {
 			fmt.Fprintf(os.Stderr, "No workflow files found in .github/workflows\n")
-			return nil, nil
+			return &ScanResult{
+				Candidates:     []*Candidate{},
+				IneligibleJobs: []*IneligibleJob{},
+			}, nil
 		}
 	}
 
 	var candidates []*Candidate
+	var ineligibleJobs []*IneligibleJob
 
 	for _, wf := range workflows {
 		for jobName, job := range wf.Jobs {
 			// Check migration criteria
-			if isEligible(job) {
+			isEligible, reasons := checkEligibility(job)
+			if isEligible {
 				// Check for missing commands and include in candidate
 				missingCommands := job.GetMissingCommands()
 				candidates = append(candidates, &Candidate{
@@ -64,6 +83,14 @@ func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error
 					JobName:         jobName,
 					LineNumber:      job.LineStart,
 					MissingCommands: missingCommands,
+				})
+			} else {
+				// Record ineligible job with reasons
+				ineligibleJobs = append(ineligibleJobs, &IneligibleJob{
+					WorkflowPath: wf.Path,
+					JobName:      jobName,
+					LineNumber:   job.LineStart,
+					Reasons:      reasons,
 				})
 			}
 		}
@@ -79,10 +106,14 @@ func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error
 		}
 	}
 
-	return candidates, nil
+	return &ScanResult{
+		Candidates:     candidates,
+		IneligibleJobs: ineligibleJobs,
+	}, nil
 }
 
-// isEligible checks if a job meets all migration criteria
+// checkEligibility checks if a job meets all migration criteria and returns
+// eligibility status along with reasons if not eligible.
 // Criteria:
 // 1. Runs on ubuntu-latest
 // 2. Does not use Docker commands
@@ -90,36 +121,50 @@ func Scan(skipDuration bool, verbose bool, paths ...string) ([]*Candidate, error
 // 4. Does not use services containers (e.g. services:)
 // 5. Does not run steps inside a Docker container. (e.g. container:)
 // 6. Duration check will be added later via GitHub API
-func isEligible(job *workflow.Job) bool {
+// Returns (isEligible, reasons) where reasons is empty if eligible.
+func checkEligibility(job *workflow.Job) (bool, []string) {
+	var reasons []string
+
 	// Criterion 1: Must run on ubuntu-latest
 	if !job.IsUbuntuLatest() {
-		return false
+		reasons = append(reasons, "does not run on ubuntu-latest")
+		return false, reasons
 	}
 
 	// Criterion 2: Must not use Docker commands
 	if job.HasDockerCommands() {
-		return false
+		reasons = append(reasons, "uses Docker commands")
 	}
 
 	// Criterion 3: Must not use container-based GitHub Actions
 	if job.HasContainerActions() {
-		return false
+		reasons = append(reasons, "uses container-based GitHub Actions")
 	}
 
 	// Criterion 4: Must not use services
 	if job.HasServices() {
-		return false
+		reasons = append(reasons, "uses service containers")
 	}
 
 	// Criterion 5: Must not use container: syntax
 	if job.HasContainer() {
-		return false
+		reasons = append(reasons, "uses container syntax")
 	}
 
 	// Criterion 6: Duration check will be done via GitHub API
 	// Duration is fetched after eligibility check to avoid blocking on API calls
 
-	return true
+	if len(reasons) > 0 {
+		return false, reasons
+	}
+
+	return true, nil
+}
+
+// isEligible checks if a job meets all migration criteria (kept for backward compatibility with tests)
+func isEligible(job *workflow.Job) bool {
+	isEligible, _ := checkEligibility(job)
+	return isEligible
 }
 
 // fetchDurations fetches job execution durations from GitHub API

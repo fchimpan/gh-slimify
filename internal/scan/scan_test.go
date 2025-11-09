@@ -417,7 +417,7 @@ on: push`,
 			}
 
 			// Run Scan (skip duration for tests to avoid API calls)
-			candidates, err := Scan(true, false)
+			result, err := Scan(true, false)
 
 			if tt.expectError && err == nil {
 				t.Errorf("Scan() expected error but got none")
@@ -426,6 +426,14 @@ on: push`,
 				t.Errorf("Scan() unexpected error: %v", err)
 			}
 
+			if result == nil {
+				if tt.expectedCount > 0 {
+					t.Errorf("Scan() returned nil result, expected %d candidates", tt.expectedCount)
+				}
+				return
+			}
+
+			candidates := result.Candidates
 			if len(candidates) != tt.expectedCount {
 				t.Errorf("Scan() returned %d candidates, want %d", len(candidates), tt.expectedCount)
 			}
@@ -469,11 +477,11 @@ func TestScan_NoWorkflowDirectory(t *testing.T) {
 		os.Chdir(originalWd)
 	}()
 
-	candidates, err := Scan(true, false)
+	result, err := Scan(true, false)
 	if err == nil {
 		t.Error("Scan() expected error when workflow directory doesn't exist")
 	}
-	if candidates != nil {
-		t.Errorf("Scan() expected nil candidates, got %v", candidates)
+	if result != nil {
+		t.Errorf("Scan() expected nil result, got %v", result)
 	}
 }
