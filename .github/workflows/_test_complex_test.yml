@@ -152,7 +152,7 @@ jobs:
       name: ${{ github.event.inputs.environment || 'production' }}
       url: https://example.com
     container:
-      image: docker:24-dind
+      image: docker:28-dind
       options: --privileged
     steps:
       - name: Checkout code
