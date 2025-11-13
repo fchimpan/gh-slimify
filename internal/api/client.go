@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cli/cli/v2/api"
+	"github.com/cli/go-gh/v2/pkg/api"
 )
+
 
 // Client wraps GitHub API client for Actions API
 type Client struct {
-	apiClient *api.Client
-	host      string
-	owner     string
-	repo      string
+	restClient *api.RESTClient
+	host       string
+	owner      string
+	repo       string
 }
 
 // NewClient creates a new GitHub API client
@@ -25,20 +26,20 @@ func NewClient(host, owner, repo string) (*Client, error) {
 		host = "github.com"
 	}
 
-	httpClient, err := api.NewHTTPClient(api.HTTPClientOptions{})
+	// Create REST client with automatic authentication from gh CLI
+	restClient, err := api.DefaultRESTClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
+		return nil, fmt.Errorf("failed to create REST client: %w", err)
 	}
 
-	apiClient := api.NewClientFromHTTP(httpClient)
-
 	return &Client{
-		apiClient: apiClient,
-		host:      host,
-		owner:     owner,
-		repo:      repo,
+		restClient: restClient,
+		host:       host,
+		owner:      owner,
+		repo:       repo,
 	}, nil
 }
+
 
 // JobDuration represents job execution duration information
 type JobDuration struct {
@@ -105,7 +106,7 @@ func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobName
 	path := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", c.owner, c.repo, runID)
 
 	var response jobsResponse
-	err := c.apiClient.REST(c.host, "GET", path, nil, &response)
+	err := c.restClient.Get(path, &response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch jobs: %w", err)
 	}
@@ -199,7 +200,7 @@ func (c *Client) getWorkflowRuns(_ context.Context, workflowPath string) ([]work
 	path := fmt.Sprintf("repos/%s/%s/actions/workflows/%s/runs?per_page=10", c.owner, c.repo, encodedPath)
 
 	var response workflowRunsResponse
-	err := c.apiClient.REST(c.host, "GET", path, nil, &response)
+	err := c.restClient.Get(path, &response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch workflow runs: %w", err)
 	}
