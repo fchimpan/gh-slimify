@@ -108,7 +108,7 @@ jobs:
     needs: docker-image-push
     if: always()
     container:
-      image: docker:28-dind
+      image: docker:29-dind
       options: --privileged
     steps:
       - name: Checkout code

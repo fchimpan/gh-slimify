@@ -99,7 +99,7 @@ jobs:
     name: Docker Container Permission Test
     runs-on: ubuntu-latest
     container:
-      image: docker:28-dind
+      image: docker:29-dind
       options: --privileged
     permissions:
       contents: read
