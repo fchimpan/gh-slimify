@@ -3,14 +3,14 @@ module github.com/fchimpan/gh-slimify
 go 1.25.3
 
 require (
-	github.com/cli/cli/v2 v2.83.0
+	github.com/cli/cli/v2 v2.83.1
+	github.com/cli/go-gh/v2 v2.13.0
 	github.com/spf13/cobra v1.10.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
-	github.com/cli/go-gh/v2 v2.13.0 // indirect
 	github.com/cli/safeexec v1.0.1 // indirect
 	github.com/cli/shurcooL-graphql v0.0.4 // indirect
 	github.com/henvic/httpretty v0.1.4 // indirect

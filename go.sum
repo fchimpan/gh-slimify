@@ -6,6 +6,7 @@ github.com/briandowns/spinner v1.23.2 h1:Zc6ecUnI+YzLmJniCfDNaMbW0Wid1d5+qcTq4L2
 github.com/briandowns/spinner v1.23.2/go.mod h1:LaZeM4wm2Ywy6vO571mvhQNRcWfRUnXOs0RcKV0wYKM=
 github.com/cli/cli/v2 v2.83.0 h1:DIh4WStSDm15OT43vImvKp21v9JAg8pBbdVoisknTKo=
 github.com/cli/cli/v2 v2.83.0/go.mod h1:uZmWzHUZqu7vIh2reJMMU6ugd0FbNoA+yRiSp3u+YyQ=
+github.com/cli/cli/v2 v2.83.1/go.mod h1:uZmWzHUZqu7vIh2reJMMU6ugd0FbNoA+yRiSp3u+YyQ=
 github.com/cli/go-gh/v2 v2.13.0 h1:jEHZu/VPVoIJkciK3pzZd3rbT8J90swsK5Ui4ewH1ys=
 github.com/cli/go-gh/v2 v2.13.0/go.mod h1:Us/NbQ8VNM0fdaILgoXSz6PKkV5PWaEzkJdc9vR2geM=
 github.com/cli/safeexec v1.0.1 h1:e/C79PbXF4yYTN/wauC4tviMxEV13BwljGj0N9j+N00=
