@@ -17,4 +17,4 @@ jobs:
         with:
           generate_attestations: true
           go_version_file: go.mod
-          go_build_options: './cmd/slimly'
+          go_build_options: './cmd/slimify'
