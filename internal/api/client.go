@@ -48,7 +48,8 @@ type JobDuration struct {
 }
 
 // GetJobDuration gets the latest execution duration for a specific job in a workflow
-func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobName string) (*JobDuration, error) {
+// jobID is the key in the jobs map, jobDisplayName is the custom display name or job ID if not specified
+func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobID, jobDisplayName string) (*JobDuration, error) {
 	// Get workflow runs
 	runs, err := c.getWorkflowRuns(ctx, workflowPath)
 	if err != nil {
@@ -65,7 +66,7 @@ func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobName strin
 			continue
 		}
 
-		duration, err := c.getJobDurationFromRun(ctx, run.ID, jobName)
+		duration, err := c.getJobDurationFromRun(ctx, run.ID, jobID, jobDisplayName)
 		if err != nil {
 			// Continue to next run if job not found in this run
 			continue
@@ -73,7 +74,7 @@ func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobName strin
 		return duration, nil
 	}
 
-	return nil, fmt.Errorf("no successful run found with job %s", jobName)
+	return nil, fmt.Errorf("no successful run found with job %s (ID: %s)", jobDisplayName, jobID)
 }
 
 // workflowRun represents a workflow run
@@ -102,7 +103,8 @@ type jobsResponse struct {
 }
 
 // getJobDurationFromRun gets the duration of a specific job from a workflow run
-func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobName string) (*JobDuration, error) {
+// jobID is the key in the jobs map, jobDisplayName is the custom display name or job ID if not specified
+func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, jobDisplayName string) (*JobDuration, error) {
 	path := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", c.owner, c.repo, runID)
 
 	var response jobsResponse
@@ -111,35 +113,45 @@ func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobName
 		return nil, fmt.Errorf("failed to fetch jobs: %w", err)
 	}
 
-	// Try to match job by name (case-insensitive)
-	// GitHub API returns the display name, which might differ from the job ID
+	// Try to match job by display name or job ID
+	// GitHub API returns the display name (name: field in YAML, or job ID if not specified)
 	for _, j := range response.Jobs {
-		// Match by exact name or case-insensitive match
-		if strings.EqualFold(j.Name, jobName) || j.Name == jobName {
-			if j.StartedAt == "" || j.CompletedAt == "" {
-				return nil, fmt.Errorf("job %s has incomplete timing information", jobName)
-			}
+		// Match by display name (case-insensitive)
+		if strings.EqualFold(j.Name, jobDisplayName) {
+			return parseJobDuration(&j, jobDisplayName)
+		}
 
-			startTime, err := time.Parse(time.RFC3339, j.StartedAt)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse start time: %w", err)
-			}
-
-			completedTime, err := time.Parse(time.RFC3339, j.CompletedAt)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse completed time: %w", err)
-			}
-
-			duration := completedTime.Sub(startTime)
-
-			return &JobDuration{
-				JobName:  jobName,
-				Duration: duration,
-			}, nil
+		// Fallback: match by job ID (case-insensitive)
+		if strings.EqualFold(j.Name, jobID) {
+			return parseJobDuration(&j, jobDisplayName)
 		}
 	}
 
-	return nil, fmt.Errorf("job %s not found in run %d", jobName, runID)
+	return nil, fmt.Errorf("job %s (ID: %s) not found in run %d", jobDisplayName, jobID, runID)
+}
+
+// parseJobDuration parses the duration from a job and returns JobDuration
+func parseJobDuration(j *job, jobDisplayName string) (*JobDuration, error) {
+	if j.StartedAt == "" || j.CompletedAt == "" {
+		return nil, fmt.Errorf("job %s has incomplete timing information", jobDisplayName)
+	}
+
+	startTime, err := time.Parse(time.RFC3339, j.StartedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse start time: %w", err)
+	}
+
+	completedTime, err := time.Parse(time.RFC3339, j.CompletedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse completed time: %w", err)
+	}
+
+	duration := completedTime.Sub(startTime)
+
+	return &JobDuration{
+		JobName:  jobDisplayName,
+		Duration: duration,
+	}, nil
 }
 
 // GetRepoInfo gets repository owner and name from git remote

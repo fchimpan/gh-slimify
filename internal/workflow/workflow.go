@@ -17,7 +17,8 @@ type Workflow struct {
 
 // Job represents a job in a GitHub Actions workflow
 type Job struct {
-	Name      string
+	ID        string      // Job ID (the key in the jobs map)
+	Name      string      `yaml:"name"` // Custom display name from YAML
 	RunsOn    interface{} `yaml:"runs-on"`
 	Steps     []Step      `yaml:"steps"`
 	Services  interface{} `yaml:"services"`
@@ -84,7 +85,7 @@ func LoadWorkflow(path string) (*Workflow, error) {
 		// Convert file content to lines for line number detection
 		lines := strings.Split(string(data), "\n")
 
-		for jobName, jobData := range jobsData {
+		for jobID, jobData := range jobsData {
 			jobBytes, err := yaml.Marshal(jobData)
 			if err != nil {
 				continue
@@ -95,10 +96,14 @@ func LoadWorkflow(path string) (*Workflow, error) {
 				continue
 			}
 
-			job.Name = jobName
+			job.ID = jobID
+			// If Name field is not specified in YAML, use the job ID as the display name
+			if job.Name == "" {
+				job.Name = jobID
+			}
 			// Find line number for this job's runs-on by searching in original file
-			job.LineStart = findRunsOnLineNumber(lines, jobName)
-			jobs[jobName] = &job
+			job.LineStart = findRunsOnLineNumber(lines, jobID)
+			jobs[jobID] = &job
 		}
 	}
 

@@ -13,7 +13,8 @@ import (
 // Candidate represents a job that is eligible for migration
 type Candidate struct {
 	WorkflowPath    string
-	JobName         string
+	JobID           string // Job ID (the key in the jobs map)
+	JobName         string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber      int
 	Duration        string // Will be populated from GitHub API later
 	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
@@ -22,7 +23,8 @@ type Candidate struct {
 // IneligibleJob represents a job that is not eligible for migration
 type IneligibleJob struct {
 	WorkflowPath string
-	JobName      string
+	JobID        string // Job ID (the key in the jobs map)
+	JobName      string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber   int
 	Reasons      []string // Reasons why the job cannot be migrated
 }
@@ -72,7 +74,7 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 	var ineligibleJobs []*IneligibleJob
 
 	for _, wf := range workflows {
-		for jobName, job := range wf.Jobs {
+		for jobID, job := range wf.Jobs {
 			// Check migration criteria
 			isEligible, reasons := checkEligibility(job)
 			if isEligible {
@@ -80,7 +82,8 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 				missingCommands := job.GetMissingCommands()
 				candidates = append(candidates, &Candidate{
 					WorkflowPath:    wf.Path,
-					JobName:         jobName,
+					JobID:           jobID,
+					JobName:         job.Name,
 					LineNumber:      job.LineStart,
 					MissingCommands: missingCommands,
 				})
@@ -88,7 +91,8 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 				// Record ineligible job with reasons
 				ineligibleJobs = append(ineligibleJobs, &IneligibleJob{
 					WorkflowPath: wf.Path,
-					JobName:      jobName,
+					JobID:        jobID,
+					JobName:      job.Name,
 					LineNumber:   job.LineStart,
 					Reasons:      reasons,
 				})
@@ -190,11 +194,11 @@ func fetchDurations(candidates []*Candidate, verbose bool) error {
 
 	// Fetch duration for each candidate
 	for _, candidate := range candidates {
-		duration, err := client.GetJobDuration(ctx, candidate.WorkflowPath, candidate.JobName)
+		duration, err := client.GetJobDuration(ctx, candidate.WorkflowPath, candidate.JobID, candidate.JobName)
 		if err != nil {
 			// Log error for debugging but continue to next candidate
 			if verbose {
-				fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s in %s: %v\n", candidate.JobName, candidate.WorkflowPath, err)
+				fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s (ID: %s) in %s: %v\n", candidate.JobName, candidate.JobID, candidate.WorkflowPath, err)
 			}
 			continue
 		}
