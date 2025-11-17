@@ -113,8 +113,14 @@ func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, 
 		return nil, fmt.Errorf("failed to fetch jobs: %w", err)
 	}
 
-	// Try to match job by display name or job ID
-	// GitHub API returns the display name (name: field in YAML, or job ID if not specified)
+	// GitHub API returns jobs with their display name in the "name" field.
+	// The display name is either:
+	// 1. The "name:" field from the YAML (if specified)
+	// 2. The job ID (if no name is specified in the YAML)
+	//
+	// Since we need to match by display name (what appears in GitHub Actions UI),
+	// we try the display name first, then fallback to the job ID in case the job
+	// doesn't have a custom name field set.
 	for _, j := range response.Jobs {
 		// Match by display name (case-insensitive)
 		if strings.EqualFold(j.Name, jobDisplayName) {
@@ -122,6 +128,7 @@ func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, 
 		}
 
 		// Fallback: match by job ID (case-insensitive)
+		// This handles the case where the display name is the same as the job ID
 		if strings.EqualFold(j.Name, jobID) {
 			return parseJobDuration(&j, jobDisplayName)
 		}

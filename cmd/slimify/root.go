@@ -349,14 +349,14 @@ func runFix(cmd *cobra.Command, args []string) {
 			}
 
 			// Verify job still exists and is eligible
-			if _, ok := wf.Jobs[job.JobName]; !ok {
-				fmt.Fprintf(os.Stderr, "  Warning: job %s not found in %s\n", job.JobName, workflowPath)
+			if _, ok := wf.Jobs[job.JobID]; !ok {
+				fmt.Fprintf(os.Stderr, "  Warning: job %s (ID: %s) not found in %s\n", job.JobName, job.JobID, workflowPath)
 				continue
 			}
 
-			// Update runs-on value
-			if err := workflow.UpdateRunsOn(workflowPath, job.JobName, "ubuntu-slim"); err != nil {
-				fmt.Fprintf(os.Stderr, "  Error updating job %s in %s: %v\n", job.JobName, workflowPath, err)
+			// Update runs-on value (pass jobID, not jobName, since UpdateRunsOn matches by job ID)
+			if err := workflow.UpdateRunsOn(workflowPath, job.JobID, "ubuntu-slim"); err != nil {
+				fmt.Fprintf(os.Stderr, "  Error updating job %s (ID: %s) in %s: %v\n", job.JobName, job.JobID, workflowPath, err)
 				errorCount++
 				continue
 			}

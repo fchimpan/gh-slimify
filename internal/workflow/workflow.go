@@ -174,8 +174,9 @@ func findRunsOnLineNumber(lines []string, jobName string) int {
 }
 
 // UpdateRunsOn updates the runs-on value for a specific job in a workflow file
+// jobID is the key in the jobs map (e.g., "Test", "Build")
 // It preserves the original file formatting by doing line-by-line replacement
-func UpdateRunsOn(filePath string, jobName string, newRunsOn string) error {
+func UpdateRunsOn(filePath string, jobID string, newRunsOn string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file %s: %w", filePath, err)
@@ -218,8 +219,8 @@ func UpdateRunsOn(filePath string, jobName string, newRunsOn string) error {
 			break
 		}
 
-		// Check if this is the target job name
-		if inJobsSection && strings.HasPrefix(trimmed, jobName+":") {
+		// Check if this is the target job ID
+		if inJobsSection && strings.HasPrefix(trimmed, jobID+":") {
 			inTargetJob = true
 			indentLevel = lineIndent
 			continue
@@ -257,7 +258,7 @@ func UpdateRunsOn(filePath string, jobName string, newRunsOn string) error {
 	}
 
 	if !updated {
-		return fmt.Errorf("failed to find runs-on for job %s in %s", jobName, filePath)
+		return fmt.Errorf("failed to find runs-on for job %s in %s", jobID, filePath)
 	}
 
 	// Write updated content back to file
