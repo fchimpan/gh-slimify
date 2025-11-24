@@ -1,0 +1,101 @@
+---
+alwaysApply: true
+---
+
+## 🧑‍💻 Coding Rules for `slimfy`
+
+### 1. Project Structure
+- **`cmd/`** — contains the CLI entry points (e.g., `slimfy`, `fix`, `report`).
+  - Each subcommand should live under its own file or subpackage (`cmd/scan`, `cmd/fix`).
+  - Use [Cobra](https://github.com/spf13/cobra) for command definitions if needed.
+- **`internal/`** — contains feature-specific packages (e.g., `parser`, `analyzer`, `fixer`, `reporter`).
+  - Each package must encapsulate a single responsibility.
+  - Packages under `internal/` should never import each other cyclically.
+- **`pkg/` (optional)** — for reusable, generic libraries that are not specific to `slimfy`.
+
+---
+
+### 2. Testing Policy
+- Each package must have **table-driven tests**.
+- Use the `testing` standard library; no external testing frameworks unless strictly necessary.
+- Test naming convention: `Test<FunctionName>_<CaseDescription>`.
+- For CLI tests, simulate execution using `os.Args` and capture stdout/stderr.
+- Keep coverage ≥ **80%** for all logic in `internal/`.
+- Place example workflows under `testdata/` for consistent parsing tests.
+- If using testdata, use the `testdata` package to load the files.
+
+---
+
+### 3. Code Style & Quality
+- Follow [Effective Go](https://go.dev/doc/effective_go) and [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments).
+- Lint with `golangci-lint` (include checks: `gofmt`, `govet`, `errcheck`, `ineffassign`, `staticcheck`).
+- Keep functions small and focused (≤ 50 LOC preferred).
+- Avoid global state — use dependency injection for configuration and I/O.
+- Return structured errors (`fmt.Errorf("context: %w", err)`) instead of printing directly.
+- Do not use `log.Fatal` in libraries — only in CLI entry points.
+- Prefer `context.Context` for cancellable or API-related operations.
+
+---
+
+### 4. CLI Design
+- Command syntax should follow:
+  ```bash
+  gh slimfy [command] [flags]
+  ```
+- Each command must have:
+  - `Use`, `Short`, and `Long` descriptions.
+  - `Example` usage string.
+- Output must be deterministic (JSON/Markdown/text).
+- All commands must support `--json` and `--verbose` flags for scripting and debugging.
+
+---
+
+### 5. Error Handling & Logging
+- Use structured, user-friendly errors:
+  - CLI: human-readable messages.
+  - JSON mode: structured error objects.
+- Do not print stack traces unless `--debug` is enabled.
+- Use `log/slog` for structured logging (no third-party logger).
+
+---
+
+### 6. AI Integration Guidelines
+- Keep AI interaction logic (prompt building, result parsing) isolated in `internal/ai`.
+- All AI prompts must be deterministic and version-controlled.
+- AI suggestions should be *advisory*; never modify files without explicit user confirmation (`gh slimfy fix`).
+
+---
+
+### 7. Performance & Reliability
+- CLI execution should complete within **1 second** for small repositories.
+- Use caching for repeated workflow scans (optional: `.slimfy_cache.json`).
+- Ensure deterministic file ordering when scanning multiple workflows.
+
+---
+
+### 8. Documentation & Developer UX
+- Every package must have a top-level `doc.go` describing its purpose.
+- Each command should have usage examples tested with `go test ./cmd/...`.
+- Provide `README.md` with installation and usage instructions.
+- Use `make` or `taskfile` for common developer tasks (`lint`, `test`, `build`, `install`).
+
+---
+
+### 9. Commit & Release Policy
+- Conventional commits format: `feat:`, `fix:`, `chore:`, `test:`, `refactor:`, `docs:`.
+- All PRs must pass linting and tests before merge.
+- Versioning follows [SemVer](https://semver.org/) principles.
+
+---
+
+### 10. Review Checklist
+Before merging, ensure:
+- [ ] Unit tests added or updated.
+- [ ] Code formatted with `go fmt`.
+- [ ] Linter passes without warnings.
+- [ ] No CLI output regressions.
+- [ ] Documentation updated if behavior changed.
+
+---
+
+These rules ensure `slimfy` remains **maintainable, testable, and extensible**, while aligning with Go community best practices and GitHub CLI extension standards.
