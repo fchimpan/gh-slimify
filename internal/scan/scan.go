@@ -16,7 +16,7 @@ type Candidate struct {
 	JobID           string // Job ID (the key in the jobs map)
 	JobName         string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber      int
-	Duration        string // Will be populated from GitHub API later
+	Duration        string   // Will be populated from GitHub API later
 	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
 }
 
