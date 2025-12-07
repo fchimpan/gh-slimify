@@ -533,13 +533,13 @@ func TestJob_HasContainer_EdgeCases(t *testing.T) {
 
 func TestJob_CombinedChecks(t *testing.T) {
 	tests := []struct {
-		name           string
-		job            *Job
-		wantUbuntu     bool
-		wantDockerCmd  bool
-		wantDockerAct  bool
-		wantServices   bool
-		wantContainer  bool
+		name          string
+		job           *Job
+		wantUbuntu    bool
+		wantDockerCmd bool
+		wantDockerAct bool
+		wantServices  bool
+		wantContainer bool
 	}{
 		{
 			name: "fully eligible job",
@@ -586,8 +586,8 @@ func TestJob_CombinedChecks(t *testing.T) {
 		{
 			name: "job with services",
 			job: &Job{
-				RunsOn:    "ubuntu-latest",
-				Steps:     []Step{{Run: "echo hello"}},
+				RunsOn: "ubuntu-latest",
+				Steps:  []Step{{Run: "echo hello"}},
 				Services: map[string]any{
 					"postgres": map[string]any{},
 				},
@@ -773,7 +773,7 @@ lsof -i :8080`},
 			name: "job with empty steps",
 			job: &Job{
 				RunsOn: "ubuntu-latest",
-				Steps: []Step{},
+				Steps:  []Step{},
 			},
 			expectedMissing: nil,
 		},

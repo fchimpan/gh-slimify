@@ -416,7 +416,7 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 				}
 				content := string(data)
 				lines := strings.Split(content, "\n")
-				
+
 				// Find runs-on and steps lines and verify they have the same indentation
 				var runsOnLine string
 				var stepsLine string
@@ -428,14 +428,14 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 						stepsLine = line
 					}
 				}
-				
+
 				if runsOnLine == "" {
 					t.Fatal("runs-on line not found")
 				}
 				if stepsLine == "" {
 					t.Fatal("steps line not found")
 				}
-				
+
 				// Extract indentation (leading spaces/tabs)
 				runsOnIndent := ""
 				for _, char := range runsOnLine {
@@ -445,7 +445,7 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 						break
 					}
 				}
-				
+
 				stepsIndent := ""
 				for _, char := range stepsLine {
 					if char == ' ' || char == '\t' {
@@ -454,7 +454,7 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 						break
 					}
 				}
-				
+
 				if runsOnIndent != stepsIndent {
 					t.Errorf("runs-on and steps should have the same indentation. runs-on: %q, steps: %q", runsOnIndent, stepsIndent)
 					t.Errorf("runs-on line: %q", runsOnLine)
@@ -475,7 +475,7 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 				}
 				content := string(data)
 				lines := strings.Split(content, "\n")
-				
+
 				// Find the runs-on line and verify it has correct indentation
 				for _, line := range lines {
 					if strings.Contains(line, "runs-on:") {

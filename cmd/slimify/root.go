@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/fchimpan/gh-slimify/internal/scan"
 	"github.com/fchimpan/gh-slimify/internal/workflow"
 	"github.com/spf13/cobra"
@@ -27,7 +29,7 @@ eligible ubuntu-latest jobs to ubuntu-slim.
 
 By default, you must specify workflow file(s) to process. Use --all to scan all
 workflows in .github/workflows/*.yml.`,
-		Run: runScan,
+		Run:  runScan,
 		Args: cobra.ArbitraryArgs,
 	}
 
@@ -45,7 +47,7 @@ are updated. Use --force to also update jobs with warnings.
 
 By default, you must specify workflow file(s) to process. Use --all to scan all
 workflows in .github/workflows/*.yml.`,
-		Run: runFix,
+		Run:  runFix,
 		Args: cobra.ArbitraryArgs,
 	}
 	fixCmd.Flags().BoolVar(&force, "force", false, "Also update jobs with warnings (missing commands or unknown execution time)")
@@ -77,11 +79,22 @@ func runScan(cmd *cobra.Command, args []string) {
 		filesToScan = files
 	}
 
+	// Start spinner during scan
+	sp := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
+	sp.Suffix = " Scanning workflows..."
+	sp.Start()
+
 	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+
+	sp.Stop()
+
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ Scan failed\n")
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	fmt.Fprintf(os.Stderr, "✓ Scan complete\n")
 
 	candidates := result.Candidates
 	ineligibleJobs := result.IneligibleJobs
@@ -269,11 +282,22 @@ func runFix(cmd *cobra.Command, args []string) {
 		filesToScan = files
 	}
 
+	// Start spinner during scan
+	sp := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
+	sp.Suffix = " Scanning workflows..."
+	sp.Start()
+
 	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+
+	sp.Stop()
+
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ Scan failed\n")
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	fmt.Fprintf(os.Stderr, "✓ Scan complete\n")
 
 	candidates := result.Candidates
 
@@ -336,27 +360,61 @@ func runFix(cmd *cobra.Command, args []string) {
 	updatedCount := 0
 	errorCount := 0
 
+	// Start spinner for updating phase
+	updateSpinner := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
+	updateSpinner.Suffix = " Updating workflows..."
+	updateSpinner.Start()
+
+	// Collect update results
+	type updateResult struct {
+		workflowPath string
+		jobName      string
+		lineNumber   int
+		hasWarnings  bool
+		isError      bool
+		errorMsg     string
+		isNotFound   bool
+	}
+	var results []updateResult
+
 	// Update each workflow file
 	for workflowPath, jobs := range workflowMap {
-		fmt.Printf("Updating %s\n", workflowPath)
 		for _, job := range jobs {
 			// Reload workflow to get current state
 			wf, err := workflow.LoadWorkflow(workflowPath)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  Error loading workflow %s: %v\n", workflowPath, err)
+				results = append(results, updateResult{
+					workflowPath: workflowPath,
+					jobName:      job.JobName,
+					lineNumber:   job.LineNumber,
+					isError:      true,
+					errorMsg:     fmt.Sprintf("Error loading workflow %s: %v", workflowPath, err),
+				})
 				errorCount++
 				continue
 			}
 
 			// Verify job still exists and is eligible
 			if _, ok := wf.Jobs[job.JobID]; !ok {
-				fmt.Fprintf(os.Stderr, "  Warning: job %s (ID: %s) not found in %s\n", job.JobName, job.JobID, workflowPath)
+				results = append(results, updateResult{
+					workflowPath: workflowPath,
+					jobName:      job.JobName,
+					lineNumber:   job.LineNumber,
+					isNotFound:   true,
+					errorMsg:     fmt.Sprintf("job %s (ID: %s) not found in %s", job.JobName, job.JobID, workflowPath),
+				})
 				continue
 			}
 
 			// Update runs-on value (pass jobID, not jobName, since UpdateRunsOn matches by job ID)
 			if err := workflow.UpdateRunsOn(workflowPath, job.JobID, "ubuntu-slim"); err != nil {
-				fmt.Fprintf(os.Stderr, "  Error updating job %s (ID: %s) in %s: %v\n", job.JobName, job.JobID, workflowPath, err)
+				results = append(results, updateResult{
+					workflowPath: workflowPath,
+					jobName:      job.JobName,
+					lineNumber:   job.LineNumber,
+					isError:      true,
+					errorMsg:     fmt.Sprintf("Error updating job %s (ID: %s) in %s: %v", job.JobName, job.JobID, workflowPath, err),
+				})
 				errorCount++
 				continue
 			}
@@ -369,15 +427,48 @@ func runFix(cmd *cobra.Command, args []string) {
 			hasMissingCommands := len(job.MissingCommands) > 0
 			hasUnknownDuration := duration == "unknown"
 
-			if hasMissingCommands || hasUnknownDuration {
-				fmt.Printf("  ⚠️  Updated job \"%s\" (L%d) → ubuntu-slim (with warnings)\n", job.JobName, job.LineNumber)
-			} else {
-				fmt.Printf("  ✓ Updated job \"%s\" (L%d) → ubuntu-slim\n", job.JobName, job.LineNumber)
-			}
+			results = append(results, updateResult{
+				workflowPath: workflowPath,
+				jobName:      job.JobName,
+				lineNumber:   job.LineNumber,
+				hasWarnings:  hasMissingCommands || hasUnknownDuration,
+			})
 			updatedCount++
 		}
-		fmt.Println()
 	}
+
+	// Stop spinner and display results
+	updateSpinner.Stop()
+
+	if errorCount > 0 {
+		fmt.Fprintf(os.Stderr, "✗ Update completed with errors\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "✓ Update complete\n")
+	}
+	fmt.Println()
+
+	// Display grouped results
+	currentWorkflow := ""
+	for _, r := range results {
+		if r.workflowPath != currentWorkflow {
+			if currentWorkflow != "" {
+				fmt.Println()
+			}
+			fmt.Printf("Updated %s\n", r.workflowPath)
+			currentWorkflow = r.workflowPath
+		}
+
+		if r.isError {
+			fmt.Fprintf(os.Stderr, "  ✗ %s\n", r.errorMsg)
+		} else if r.isNotFound {
+			fmt.Fprintf(os.Stderr, "  ⚠️  Warning: %s\n", r.errorMsg)
+		} else if r.hasWarnings {
+			fmt.Printf("  ⚠️  Updated job \"%s\" (L%d) → ubuntu-slim (with warnings)\n", r.jobName, r.lineNumber)
+		} else {
+			fmt.Printf("  ✓ Updated job \"%s\" (L%d) → ubuntu-slim\n", r.jobName, r.lineNumber)
+		}
+	}
+	fmt.Println()
 
 	// Summary
 	fmt.Printf("Successfully updated %d job(s) to use ubuntu-slim.\n", updatedCount)

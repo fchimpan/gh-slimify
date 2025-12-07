@@ -10,7 +10,6 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 
-
 // Client wraps GitHub API client for Actions API
 type Client struct {
 	restClient *api.RESTClient
@@ -39,7 +38,6 @@ func NewClient(host, owner, repo string) (*Client, error) {
 		repo:       repo,
 	}, nil
 }
-
 
 // JobDuration represents job execution duration information
 type JobDuration struct {
