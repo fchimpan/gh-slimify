@@ -8,6 +8,8 @@
 >`ubuntu-slim` is currently in **public preview** and may change before general availability. 
 >Please review GitHub's official documentation for the latest updates and breaking changes.
 
+![gh-slimify scan output](image.png)
+
 > [!TIP] 
 > 💡 Wait, couldn't you just copy-paste the following prompt into AI agent and skip using this tool altogether? 🤔😏 *Spoiler alert: You'll be back.*
 > ```md
