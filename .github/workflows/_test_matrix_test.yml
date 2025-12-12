@@ -147,7 +147,7 @@ jobs:
       
       - name: Upload coverage
         if: matrix.coverage == true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-${{ matrix.test-type }}-${{ matrix.go-version }}
           path: coverage-${{ matrix.test-type }}-${{ matrix.go-version }}.out
