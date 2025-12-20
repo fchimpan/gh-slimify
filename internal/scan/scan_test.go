@@ -208,6 +208,19 @@ echo "Done"`,
 			},
 			expected: true,
 		},
+		{
+			name: "not eligible - uses Homebrew setup action",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []workflow.Step{
+					{Uses: "actions/checkout@v4"},
+					{Uses: "Homebrew/actions/setup-homebrew@v1"},
+					{Run: "brew install something"},
+				},
+				Services: nil,
+			},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {

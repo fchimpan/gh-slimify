@@ -155,6 +155,21 @@ func (j *Job) HasContainer() bool {
 	return j.Container != nil
 }
 
+// HasHomebrewSetupAction checks if a job uses the Homebrew setup action.
+// The Homebrew setup action is slow and flaky on ubuntu-slim runners,
+// so jobs that use it should not be migrated.
+func (j *Job) HasHomebrewSetupAction() bool {
+	for _, step := range j.Steps {
+		if step.Uses == "" {
+			continue
+		}
+		if strings.HasPrefix(step.Uses, "Homebrew/actions/setup-homebrew") {
+			return true
+		}
+	}
+	return false
+}
+
 // GetMissingCommands extracts commands from job steps and returns a list of commands
 // that exist in ubuntu-latest but are missing in ubuntu-slim.
 // It parses shell commands from step.Run fields and checks them against the

@@ -147,7 +147,8 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 // 3. Does not use container-based GitHub Actions
 // 4. Does not use services containers (e.g. services:)
 // 5. Does not run steps inside a Docker container. (e.g. container:)
-// 6. Duration check will be added later via GitHub API
+// 6. Does not use Homebrew setup action
+// 7. Duration check will be added later via GitHub API
 // Returns (isEligible, reasons) where reasons is empty if eligible.
 func checkEligibility(job *workflow.Job) (bool, []string) {
 	var reasons []string
@@ -178,7 +179,12 @@ func checkEligibility(job *workflow.Job) (bool, []string) {
 		reasons = append(reasons, "uses container syntax")
 	}
 
-	// Criterion 6: Duration check will be done via GitHub API
+	// Criterion 6: Must not use Homebrew setup action
+	if job.HasHomebrewSetupAction() {
+		reasons = append(reasons, "uses Homebrew setup action")
+	}
+
+	// Criterion 7: Duration check will be done via GitHub API
 	// Duration is fetched after eligibility check to avoid blocking on API calls
 
 	if len(reasons) > 0 {

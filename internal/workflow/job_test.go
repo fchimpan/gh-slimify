@@ -605,6 +605,79 @@ func TestJob_HasContainer_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestJob_HasHomebrewSetupAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		job      *Job
+		expected bool
+	}{
+		{
+			name: "no steps",
+			job: &Job{
+				Steps: []Step{},
+			},
+			expected: false,
+		},
+		{
+			name: "uses Homebrew setup action",
+			job: &Job{
+				Steps: []Step{
+					{Uses: "Homebrew/actions/setup-homebrew@v1"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "uses Homebrew setup action without version",
+			job: &Job{
+				Steps: []Step{
+					{Uses: "Homebrew/actions/setup-homebrew"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Homebrew setup action in middle of steps",
+			job: &Job{
+				Steps: []Step{
+					{Uses: "actions/checkout@v4"},
+					{Uses: "Homebrew/actions/setup-homebrew@v1"},
+					{Run: "brew install something"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "no Homebrew setup action",
+			job: &Job{
+				Steps: []Step{
+					{Uses: "actions/checkout@v4"},
+					{Run: "echo hello"},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "only run steps",
+			job: &Job{
+				Steps: []Step{
+					{Run: "brew install something"},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.job.HasHomebrewSetupAction()
+			if got != tt.expected {
+				t.Errorf("HasHomebrewSetupAction() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestJob_CombinedChecks(t *testing.T) {
 	tests := []struct {
 		name          string
