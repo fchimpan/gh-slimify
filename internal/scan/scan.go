@@ -29,10 +29,19 @@ type IneligibleJob struct {
 	Reasons      []string // Reasons why the job cannot be migrated
 }
 
+// AlreadySlimJob represents a job that is already using ubuntu-slim
+type AlreadySlimJob struct {
+	WorkflowPath string
+	JobID        string // Job ID (the key in the jobs map)
+	JobName      string // Job display name (name: field in YAML, or job ID if not specified)
+	LineNumber   int
+}
+
 // ScanResult contains both eligible candidates and ineligible jobs
 type ScanResult struct {
-	Candidates     []*Candidate
-	IneligibleJobs []*IneligibleJob
+	Candidates      []*Candidate
+	IneligibleJobs  []*IneligibleJob
+	AlreadySlimJobs []*AlreadySlimJob
 }
 
 // Scan scans workflows and returns migration candidates and ineligible jobs
@@ -64,17 +73,30 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 		if len(workflows) == 0 {
 			fmt.Fprintf(os.Stderr, "No workflow files found in .github/workflows\n")
 			return &ScanResult{
-				Candidates:     []*Candidate{},
-				IneligibleJobs: []*IneligibleJob{},
+				Candidates:      []*Candidate{},
+				IneligibleJobs:  []*IneligibleJob{},
+				AlreadySlimJobs: []*AlreadySlimJob{},
 			}, nil
 		}
 	}
 
 	var candidates []*Candidate
 	var ineligibleJobs []*IneligibleJob
+	var alreadySlimJobs []*AlreadySlimJob
 
 	for _, wf := range workflows {
 		for jobID, job := range wf.Jobs {
+			// Check if job is already using ubuntu-slim
+			if job.IsUbuntuSlim() {
+				alreadySlimJobs = append(alreadySlimJobs, &AlreadySlimJob{
+					WorkflowPath: wf.Path,
+					JobID:        jobID,
+					JobName:      job.Name,
+					LineNumber:   job.LineStart,
+				})
+				continue
+			}
+
 			// Check migration criteria
 			isEligible, reasons := checkEligibility(job)
 			if isEligible {
@@ -111,8 +133,9 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 	}
 
 	return &ScanResult{
-		Candidates:     candidates,
-		IneligibleJobs: ineligibleJobs,
+		Candidates:      candidates,
+		IneligibleJobs:  ineligibleJobs,
+		AlreadySlimJobs: alreadySlimJobs,
 	}, nil
 }
 

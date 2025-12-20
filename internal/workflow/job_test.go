@@ -7,6 +7,80 @@ import (
 	"testing"
 )
 
+func TestJob_IsUbuntuSlim(t *testing.T) {
+	tests := []struct {
+		name     string
+		job      *Job
+		expected bool
+	}{
+		{
+			name: "ubuntu-slim string",
+			job: &Job{
+				RunsOn: "ubuntu-slim",
+			},
+			expected: true,
+		},
+		{
+			name: "ubuntu-latest string",
+			job: &Job{
+				RunsOn: "ubuntu-latest",
+			},
+			expected: false,
+		},
+		{
+			name: "nil runs-on",
+			job: &Job{
+				RunsOn: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "empty string",
+			job: &Job{
+				RunsOn: "",
+			},
+			expected: false,
+		},
+		{
+			name: "ubuntu-slim in array",
+			job: &Job{
+				RunsOn: []interface{}{"ubuntu-slim"},
+			},
+			expected: true,
+		},
+		{
+			name: "ubuntu-slim in array with others",
+			job: &Job{
+				RunsOn: []interface{}{"ubuntu-22.04", "ubuntu-slim", "macos-latest"},
+			},
+			expected: true,
+		},
+		{
+			name: "array without ubuntu-slim",
+			job: &Job{
+				RunsOn: []interface{}{"ubuntu-latest", "macos-latest"},
+			},
+			expected: false,
+		},
+		{
+			name: "unsupported type - map",
+			job: &Job{
+				RunsOn: map[string]interface{}{"os": "ubuntu-slim"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.job.IsUbuntuSlim()
+			if got != tt.expected {
+				t.Errorf("IsUbuntuSlim() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestJob_IsUbuntuLatest_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -76,6 +76,28 @@ func (j *Job) IsUbuntuLatest() bool {
 	}
 }
 
+// IsUbuntuSlim checks if a job already runs on ubuntu-slim
+func (j *Job) IsUbuntuSlim() bool {
+	if j.RunsOn == nil {
+		return false
+	}
+
+	switch v := j.RunsOn.(type) {
+	case string:
+		return v == "ubuntu-slim"
+	case []any:
+		// runs-on can be a matrix or array
+		for _, item := range v {
+			if str, ok := item.(string); ok && str == "ubuntu-slim" {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 // HasDockerCommands checks if a job uses Docker commands
 // It checks if the job uses any Docker commands in the run commands.
 // Matches patterns like "docker build", "docker-compose", "sudo docker run", etc.
