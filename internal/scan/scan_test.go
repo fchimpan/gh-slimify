@@ -485,3 +485,134 @@ func TestScan_NoWorkflowDirectory(t *testing.T) {
 		t.Errorf("Scan() expected nil result, got %v", result)
 	}
 }
+
+func TestIsEligible_AlreadySlim(t *testing.T) {
+	tests := []struct {
+		name           string
+		job            *workflow.Job
+		expectedSlim   bool
+		expectedEligible bool
+	}{
+		{
+			name: "already using ubuntu-slim",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-slim",
+				Steps:  []workflow.Step{{Run: "echo hello"}},
+			},
+			expectedSlim:     true,
+			expectedEligible: false,
+		},
+		{
+			name: "ubuntu-slim in matrix",
+			job: &workflow.Job{
+				RunsOn: []interface{}{"ubuntu-slim"},
+				Steps:  []workflow.Step{{Run: "echo hello"}},
+			},
+			expectedSlim:     true,
+			expectedEligible: false,
+		},
+		{
+			name: "ubuntu-latest - eligible",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps:  []workflow.Step{{Run: "echo hello"}},
+			},
+			expectedSlim:     false,
+			expectedEligible: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSlim := tt.job.IsUbuntuSlim()
+			if gotSlim != tt.expectedSlim {
+				t.Errorf("IsUbuntuSlim() = %v, want %v", gotSlim, tt.expectedSlim)
+			}
+
+			if !gotSlim {
+				gotEligible := isEligible(tt.job)
+				if gotEligible != tt.expectedEligible {
+					t.Errorf("isEligible() = %v, want %v", gotEligible, tt.expectedEligible)
+				}
+			}
+		})
+	}
+}
+
+func TestScan_AlreadySlimJobs(t *testing.T) {
+	// Create a temporary directory structure
+	tmpDir := t.TempDir()
+	workflowDir := filepath.Join(tmpDir, ".github", "workflows")
+	if err := os.MkdirAll(workflowDir, 0755); err != nil {
+		t.Fatalf("Failed to create workflow directory: %v", err)
+	}
+
+	// Save original working directory
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+
+	// Change to temporary directory
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		os.Chdir(originalWd)
+	}()
+
+	// Create a workflow with an already-slim job
+	workflowContent := `name: test
+on: push
+jobs:
+  already-slim:
+    runs-on: ubuntu-slim
+    steps:
+      - run: echo "already slim"
+  eligible:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "can migrate"
+  ineligible:
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo "cannot migrate"`
+
+	workflowPath := filepath.Join(workflowDir, "test.yml")
+	if err := os.WriteFile(workflowPath, []byte(workflowContent), 0644); err != nil {
+		t.Fatalf("Failed to write workflow file: %v", err)
+	}
+
+	result, err := Scan(true, false)
+	if err != nil {
+		t.Fatalf("Scan() returned error: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Scan() returned nil result")
+	}
+
+	// Check candidates (should have 1 eligible job)
+	if len(result.Candidates) != 1 {
+		t.Errorf("Expected 1 candidate, got %d", len(result.Candidates))
+	}
+	if len(result.Candidates) > 0 && result.Candidates[0].JobID != "eligible" {
+		t.Errorf("Expected eligible job, got %s", result.Candidates[0].JobID)
+	}
+
+	// Check ineligible jobs (should have 1 ineligible job)
+	if len(result.IneligibleJobs) != 1 {
+		t.Errorf("Expected 1 ineligible job, got %d", len(result.IneligibleJobs))
+	}
+	if len(result.IneligibleJobs) > 0 && result.IneligibleJobs[0].JobID != "ineligible" {
+		t.Errorf("Expected ineligible job, got %s", result.IneligibleJobs[0].JobID)
+	}
+
+	// Check already slim jobs (should have 1 already-slim job)
+	if len(result.AlreadySlimJobs) != 1 {
+		t.Errorf("Expected 1 already-slim job, got %d", len(result.AlreadySlimJobs))
+	}
+	if len(result.AlreadySlimJobs) > 0 && result.AlreadySlimJobs[0].JobID != "already-slim" {
+		t.Errorf("Expected already-slim job, got %s", result.AlreadySlimJobs[0].JobID)
+	}
+}

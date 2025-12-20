@@ -98,6 +98,7 @@ func runScan(cmd *cobra.Command, args []string) {
 
 	candidates := result.Candidates
 	ineligibleJobs := result.IneligibleJobs
+	alreadySlimJobs := result.AlreadySlimJobs
 
 	// Group candidates by workflow file
 	workflowMap := make(map[string][]*scan.Candidate)
@@ -111,12 +112,21 @@ func runScan(cmd *cobra.Command, args []string) {
 		ineligibleMap[job.WorkflowPath] = append(ineligibleMap[job.WorkflowPath], job)
 	}
 
+	// Group already slim jobs by workflow file
+	alreadySlimMap := make(map[string][]*scan.AlreadySlimJob)
+	for _, job := range alreadySlimJobs {
+		alreadySlimMap[job.WorkflowPath] = append(alreadySlimMap[job.WorkflowPath], job)
+	}
+
 	// Display results grouped by workflow file
 	allWorkflowPaths := make(map[string]bool)
 	for path := range workflowMap {
 		allWorkflowPaths[path] = true
 	}
 	for path := range ineligibleMap {
+		allWorkflowPaths[path] = true
+	}
+	for path := range alreadySlimMap {
 		allWorkflowPaths[path] = true
 	}
 
@@ -219,6 +229,17 @@ func runScan(cmd *cobra.Command, args []string) {
 				fmt.Printf("       %s\n", jobLink)
 			}
 		}
+
+		// Display already slim jobs
+		alreadySlimJobsForWorkflow := alreadySlimMap[workflowPath]
+		if len(alreadySlimJobsForWorkflow) > 0 {
+			fmt.Printf("  ✨ Already using ubuntu-slim (%d job(s)):\n", len(alreadySlimJobsForWorkflow))
+			for _, job := range alreadySlimJobsForWorkflow {
+				jobLink := formatLocalLink(workflowPath, job.LineNumber)
+				fmt.Printf("     • \"%s\" (L%d)\n", job.JobName, job.LineNumber)
+				fmt.Printf("       %s\n", jobLink)
+			}
+		}
 	}
 
 	// Summary
@@ -251,10 +272,13 @@ func runScan(cmd *cobra.Command, args []string) {
 	if len(ineligibleJobs) > 0 {
 		fmt.Printf("❌ %d job(s) cannot be migrated\n", len(ineligibleJobs))
 	}
+	if len(alreadySlimJobs) > 0 {
+		fmt.Printf("✨ %d job(s) already using ubuntu-slim\n", len(alreadySlimJobs))
+	}
 	if len(candidates) > 0 {
 		fmt.Printf("📊 Total: %d job(s) eligible for migration\n", len(candidates))
 	}
-	if len(candidates) == 0 && len(ineligibleJobs) == 0 {
+	if len(candidates) == 0 && len(ineligibleJobs) == 0 && len(alreadySlimJobs) == 0 {
 		fmt.Println("No jobs found that can be safely migrated to ubuntu-slim.")
 	}
 }
