@@ -1,0 +1,186 @@
+# Test workflow to compare Homebrew behavior on ubuntu-latest vs ubuntu-slim
+# This helps verify the performance and stability differences reported by Homebrew maintainers
+# Reference: Homebrew/actions/setup-homebrew is slow and flaky on ubuntu-slim
+name: Test Homebrew Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'test-homebrew-**'
+
+jobs:
+  homebrew-ubuntu-latest:
+    name: Homebrew on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Record start time
+        id: start
+        run: echo "time=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Setup Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Verify Homebrew installation
+        run: |
+          echo "=== Homebrew Version ==="
+          brew --version
+          echo ""
+          echo "=== Homebrew Config ==="
+          brew config
+          echo ""
+          echo "=== Homebrew Doctor (quick check) ==="
+          brew doctor || true
+
+      - name: Install a package via Homebrew
+        run: |
+          echo "=== Installing jq via Homebrew ==="
+          time brew install jq
+          echo ""
+          echo "=== Verify jq installation ==="
+          jq --version
+          which jq
+
+      - name: Install another package via Homebrew
+        run: |
+          echo "=== Installing gh via Homebrew ==="
+          time brew install gh
+          echo ""
+          echo "=== Verify gh installation ==="
+          gh --version
+          which gh
+
+      - name: Record end time and calculate duration
+        id: end
+        run: |
+          END_TIME=$(date +%s)
+          START_TIME=${{ steps.start.outputs.time }}
+          DURATION=$((END_TIME - START_TIME))
+          echo "duration=${DURATION}" >> $GITHUB_OUTPUT
+          echo "Total execution time: ${DURATION} seconds"
+
+      - name: Summary
+        run: |
+          echo "## ubuntu-latest Homebrew Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner**: ubuntu-latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Duration**: ${{ steps.end.outputs.duration }} seconds" >> $GITHUB_STEP_SUMMARY
+          echo "- **Homebrew Version**: $(brew --version | head -1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **jq Version**: $(jq --version)" >> $GITHUB_STEP_SUMMARY
+          echo "- **gh Version**: $(gh --version | head -1)" >> $GITHUB_STEP_SUMMARY
+
+  homebrew-ubuntu-slim:
+    name: Homebrew on ubuntu-slim
+    runs-on: ubuntu-slim
+    continue-on-error: true  # Allow this job to fail without failing the workflow
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Record start time
+        id: start
+        run: echo "time=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Setup Homebrew
+        id: setup-homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+        continue-on-error: true
+
+      - name: Check Homebrew setup result
+        run: |
+          if [ "${{ steps.setup-homebrew.outcome }}" = "failure" ]; then
+            echo "::warning::Homebrew setup failed on ubuntu-slim"
+            echo "This confirms the reported flakiness issue"
+          fi
+
+      - name: Verify Homebrew installation
+        if: steps.setup-homebrew.outcome == 'success'
+        run: |
+          echo "=== Homebrew Version ==="
+          brew --version
+          echo ""
+          echo "=== Homebrew Config ==="
+          brew config
+          echo ""
+          echo "=== Homebrew Doctor (quick check) ==="
+          brew doctor || true
+
+      - name: Install a package via Homebrew
+        if: steps.setup-homebrew.outcome == 'success'
+        id: install-jq
+        continue-on-error: true
+        run: |
+          echo "=== Installing jq via Homebrew ==="
+          time brew install jq
+          echo ""
+          echo "=== Verify jq installation ==="
+          jq --version
+          which jq
+
+      - name: Install another package via Homebrew
+        if: steps.setup-homebrew.outcome == 'success'
+        id: install-gh
+        continue-on-error: true
+        run: |
+          echo "=== Installing gh via Homebrew ==="
+          time brew install gh
+          echo ""
+          echo "=== Verify gh installation ==="
+          gh --version
+          which gh
+
+      - name: Record end time and calculate duration
+        id: end
+        run: |
+          END_TIME=$(date +%s)
+          START_TIME=${{ steps.start.outputs.time }}
+          DURATION=$((END_TIME - START_TIME))
+          echo "duration=${DURATION}" >> $GITHUB_OUTPUT
+          echo "Total execution time: ${DURATION} seconds"
+
+      - name: Summary
+        run: |
+          echo "## ubuntu-slim Homebrew Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner**: ubuntu-slim" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Duration**: ${{ steps.end.outputs.duration }} seconds" >> $GITHUB_STEP_SUMMARY
+          echo "- **Setup Homebrew**: ${{ steps.setup-homebrew.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Install jq**: ${{ steps.install-jq.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Install gh**: ${{ steps.install-gh.outcome }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.setup-homebrew.outcome }}" = "failure" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Note**: Homebrew setup failed, confirming reported flakiness on slim runners" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  compare-results:
+    name: Compare Results
+    runs-on: ubuntu-latest
+    needs: [homebrew-ubuntu-latest, homebrew-ubuntu-slim]
+    if: always()
+    steps:
+      - name: Generate Comparison Report
+        run: |
+          echo "# Homebrew Compatibility Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Runner | Job Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ubuntu-latest | ${{ needs.homebrew-ubuntu-latest.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ubuntu-slim | ${{ needs.homebrew-ubuntu-slim.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recommendation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.homebrew-ubuntu-slim.result }}" != "success" ]; then
+            echo "⚠️ **Jobs using \`Homebrew/actions/setup-homebrew\` should NOT be migrated to ubuntu-slim.**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "As reported by Homebrew maintainers, the setup-homebrew action is slow and flaky on slim runners." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Both runners completed successfully. However, compare execution times in individual job summaries." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Even if successful, ubuntu-slim may be significantly slower for Homebrew operations." >> $GITHUB_STEP_SUMMARY
+          fi
+
