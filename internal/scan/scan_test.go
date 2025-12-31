@@ -488,9 +488,9 @@ func TestScan_NoWorkflowDirectory(t *testing.T) {
 
 func TestIsEligible_AlreadySlim(t *testing.T) {
 	tests := []struct {
-		name           string
-		job            *workflow.Job
-		expectedSlim   bool
+		name             string
+		job              *workflow.Job
+		expectedSlim     bool
 		expectedEligible bool
 	}{
 		{
