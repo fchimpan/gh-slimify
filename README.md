@@ -5,8 +5,7 @@
 [![GitHub CLI](https://img.shields.io/badge/gh-cli-blue.svg)](https://cli.github.com)
 
 >[!WARNING] 
->`ubuntu-slim` is currently in **public preview** and may change before general availability. 
->Please review GitHub's official documentation for the latest updates and breaking changes.
+>Migrating to `ubuntu-slim` may cause workflow instability or increased execution time.
 
 ![gh-slimify scan output](image.png)
 
