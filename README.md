@@ -7,10 +7,10 @@
 >[!WARNING] 
 >Migrating to `ubuntu-slim` may cause workflow instability or increased execution time.
 
-![gh-slimify scan output](image.png)
+![gh-slimify scan output](images/demo.gif)
 
 > [!TIP] 
-> 💡 Wait, couldn't you just copy-paste the following prompt into AI agent and skip using this tool altogether? 🤔😏 *Spoiler alert: You'll be back.*
+> 💡 Wait, couldn't you just copy-paste the following prompt into AI agent and skip using this tool altogether? 🤔
 > ```md
 > Goal: For every workflow file under `.github/workflows`, migrate jobs that currently run on `ubuntu-latest` to the container-based runner `ubuntu-slim`. Use the following decision rules in order when judging whether to migrate a job:
 > 
