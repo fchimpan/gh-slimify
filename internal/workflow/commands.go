@@ -2933,7 +2933,9 @@ var ubuntuLatestCommands = map[string]bool{
 }
 
 // ubuntuSlimCommands is a map of all commands available in ubuntu-slim runner.
-// This map is generated from ubuntu-slim runner's `compgen -c` command output.
+// This map is generated from ubuntu-slim runner's `compgen -c` command output,
+// with additional commands from the official ubuntu-slim README:
+// https://github.com/actions/runner-images/blob/main/images/ubuntu-slim/ubuntu-slim-Readme.md
 var ubuntuSlimCommands = map[string]bool{
 	"!":                                  true,
 	".":                                  true,
@@ -3390,6 +3392,8 @@ var ubuntuSlimCommands = map[string]bool{
 	"lesspipe":                           true,
 	"let":                                true,
 	"libnetcfg":                          true,
+	"libtool":                            true,
+	"libtoolize":                         true,
 	"link":                               true,
 	"linux32":                            true,
 	"linux64":                            true,
@@ -3447,6 +3451,7 @@ var ubuntuSlimCommands = map[string]bool{
 	"memusagestat":                       true,
 	"mesa-overlay-control.py":            true,
 	"mesg":                               true,
+	"mercurial":                          true,
 	"migrate-pubring-from-classic-gpg":   true,
 	"mimeopen":                           true,
 	"mimetype":                           true,
@@ -3498,6 +3503,7 @@ var ubuntuSlimCommands = map[string]bool{
 	"npx":                                true,
 	"nsenter":                            true,
 	"numfmt":                             true,
+	"nvm":                                true,
 	"nyc":                                true,
 	"objcopy":                            true,
 	"objdump":                            true,
@@ -3942,6 +3948,7 @@ var ubuntuSlimCommands = map[string]bool{
 	"xstdcmap":                           true,
 	"xsubpp":                             true,
 	"xvidtune":                           true,
+	"xvfb":                               true,
 	"xvinfo":                             true,
 	"xwininfo":                           true,
 	"xz":                                 true,
