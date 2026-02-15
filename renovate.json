@@ -16,7 +16,6 @@
     },
     {
       "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["patch"],
       "automerge": true,
       "automergeType": "pr",
       "automergeStrategy": "squash"
