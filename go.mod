@@ -1,6 +1,6 @@
 module github.com/fchimpan/gh-slimify
 
-go 1.25.3
+go 1.26.0
 
 require (
 	github.com/briandowns/spinner v1.23.2
