@@ -12,6 +12,11 @@
     },
     {
       "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "versioning": "semver"
+    },
+    {
+      "matchManagers": ["gomod"],
       "postUpdateOptions": ["gomodTidy"]
     },
     {
