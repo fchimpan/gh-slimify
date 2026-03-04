@@ -46,6 +46,14 @@ var (
 		regexp.MustCompile(`\bdocker\s+compose\b`),
 	}
 
+	// privilegedCommandPattern matches privileged operations that require capabilities
+	// not available in non-privileged containers like ubuntu-slim.
+	// Categories: filesystem mounts, kernel modules, network firewall,
+	// sysctl, namespaces, cgroups, device management, Linux capabilities.
+	privilegedCommandPattern = regexp.MustCompile(
+		`\b(mount|umount|modprobe|insmod|rmmod|iptables|ip6tables|nft|nftables|sysctl|unshare|nsenter|cgcreate|cgexec|mknod|losetup|setcap|getcap|capsh)\b`,
+	)
+
 	// containerActionPrefixes lists prefixes that indicate container-based GitHub Actions
 	// This covers:
 	// - docker:// image syntax (e.g., "docker://alpine:latest")
@@ -145,6 +153,31 @@ func (j *Job) HasContainerActions() bool {
 // nested container jobs are not supported.
 func (j *Job) HasServices() bool {
 	return j.Services != nil
+}
+
+// HasPrivilegedOperations checks if a job uses privileged operations
+// that require capabilities not available in non-privileged containers.
+// Returns whether privileged operations were found and a deduplicated list of command names.
+func (j *Job) HasPrivilegedOperations() (bool, []string) {
+	seen := make(map[string]bool)
+	var cmds []string
+
+	for _, step := range j.Steps {
+		if step.Run == "" {
+			continue
+		}
+
+		runLower := strings.ToLower(step.Run)
+		for _, match := range privilegedCommandPattern.FindAllStringSubmatch(runLower, -1) {
+			cmd := match[1]
+			if !seen[cmd] {
+				seen[cmd] = true
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+
+	return len(cmds) > 0, cmds
 }
 
 // HasContainer checks if a job uses the container: syntax
