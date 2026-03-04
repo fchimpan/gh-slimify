@@ -212,12 +212,78 @@ Update jobs with warnings (missing commands or unknown execution time):
 gh slimify fix --force
 ```
 
+### JSON Output
+
+Use `--json` to output results in machine-readable JSON format. This is useful for CI/CD pipelines, AI agents, or other tools that need to parse the results programmatically.
+
+```bash
+gh slimify --json --all
+gh slimify fix --json --all
+```
+
+**Example scan output:**
+
+```json
+{
+  "jobs": [
+    {
+      "workflow_path": ".github/workflows/ci.yml",
+      "job_id": "lint",
+      "job_name": "Lint",
+      "line_number": 8,
+      "status": "safe",
+      "status_description": "Safe to migrate to ubuntu-slim. No missing commands and execution time is known.",
+      "recommended_action": "migrate",
+      "duration_seconds": 143
+    },
+    {
+      "workflow_path": ".github/workflows/ci.yml",
+      "job_id": "build",
+      "job_name": "Build",
+      "line_number": 25,
+      "status": "warning",
+      "status_description": "Can migrate but requires attention. Setup may be required for: docker.",
+      "recommended_action": "review_before_migrate",
+      "duration_seconds": 230,
+      "missing_commands": ["docker"]
+    }
+  ],
+  "summary": {
+    "safe": 1,
+    "warning": 1,
+    "ineligible": 0,
+    "already_slim": 0,
+    "total": 2
+  }
+}
+```
+
+**Scan job statuses:**
+
+| Status | Recommended Action | Description |
+|---|---|---|
+| `safe` | `migrate` | Safe to migrate, no issues found |
+| `warning` | `review_before_migrate` | Can migrate but has missing commands or unknown duration |
+| `ineligible` | `do_not_migrate` | Cannot migrate to ubuntu-slim |
+| `already_slim` | `no_action_needed` | Already using ubuntu-slim |
+
+**Fix job statuses:**
+
+| Status | Recommended Action | Description |
+|---|---|---|
+| `updated` | `verify_workflow` | Successfully updated to ubuntu-slim |
+| `updated` (with warnings) | `verify_workflow_carefully` | Updated but requires careful verification |
+| `skipped` | `review_then_force` | Skipped due to warnings, use `--force` to update |
+| `error` | `investigate_error` | Failed to update |
+| `not_found` | `investigate_error` | Job not found in workflow file |
+
 ### Combine Options
 
 ```bash
 gh slimify fix .github/workflows/ci.yml --skip-duration --force
 gh slimify --all --skip-duration
 gh slimify fix --all --force
+gh slimify --json --all --skip-duration
 ```
 
 ## 🔍 Migration Criteria
@@ -341,6 +407,7 @@ jobs:
    - Warning reasons in a single line
    - Relative file paths with line numbers (clickable in most terminals)
    - Execution durations
+   - Machine-readable JSON output (`--json`) with status descriptions and recommended actions for AI agents and automation
 7. **Auto-Fix** (optional): Updates `runs-on: ubuntu-latest` to `runs-on: ubuntu-slim`:
    - By default: Only safe jobs are updated
    - With `--force`: All eligible jobs (including those with warnings) are updated
