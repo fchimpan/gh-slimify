@@ -46,18 +46,13 @@ var (
 		regexp.MustCompile(`\bdocker\s+compose\b`),
 	}
 
-	// privilegedCommandPatterns lists regex patterns that match privileged operations
-	// These commands require capabilities not available in non-privileged containers like ubuntu-slim.
-	privilegedCommandPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`\b(mount|umount)\b`),                        // ファイルシステムマウント
-		regexp.MustCompile(`\b(modprobe|insmod|rmmod)\b`),               // カーネルモジュール操作
-		regexp.MustCompile(`\b(iptables|ip6tables|nft|nftables)\b`),     // ネットワーク特権操作
-		regexp.MustCompile(`\bsysctl\b`),                                // システム制御
-		regexp.MustCompile(`\b(unshare|nsenter)\b`),                     // namespace操作
-		regexp.MustCompile(`\b(cgcreate|cgexec)\b`),                     // cgroup操作
-		regexp.MustCompile(`\b(mknod|losetup)\b`),                       // デバイス管理
-		regexp.MustCompile(`\b(setcap|getcap|capsh)\b`),                 // capability管理
-	}
+	// privilegedCommandPattern matches privileged operations that require capabilities
+	// not available in non-privileged containers like ubuntu-slim.
+	// Categories: filesystem mounts, kernel modules, network firewall,
+	// sysctl, namespaces, cgroups, device management, Linux capabilities.
+	privilegedCommandPattern = regexp.MustCompile(
+		`\b(mount|umount|modprobe|insmod|rmmod|iptables|ip6tables|nft|nftables|sysctl|unshare|nsenter|cgcreate|cgexec|mknod|losetup|setcap|getcap|capsh)\b`,
+	)
 
 	// containerActionPrefixes lists prefixes that indicate container-based GitHub Actions
 	// This covers:
@@ -173,18 +168,11 @@ func (j *Job) HasPrivilegedOperations() (bool, []string) {
 		}
 
 		runLower := strings.ToLower(step.Run)
-		for _, pattern := range privilegedCommandPatterns {
-			matches := pattern.FindAllStringSubmatch(runLower, -1)
-			for _, match := range matches {
-				// match[0] is the full match; for alternation groups, match[1] is the captured group
-				cmd := match[0]
-				if len(match) > 1 && match[1] != "" {
-					cmd = match[1]
-				}
-				if !seen[cmd] {
-					seen[cmd] = true
-					cmds = append(cmds, cmd)
-				}
+		for _, match := range privilegedCommandPattern.FindAllStringSubmatch(runLower, -1) {
+			cmd := match[1]
+			if !seen[cmd] {
+				seen[cmd] = true
+				cmds = append(cmds, cmd)
 			}
 		}
 	}
