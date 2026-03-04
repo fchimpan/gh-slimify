@@ -3,6 +3,7 @@ package scan
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fchimpan/gh-slimify/internal/workflow"
@@ -208,6 +209,51 @@ echo "Done"`,
 			},
 			expected: true,
 		},
+		{
+			name: "not eligible - uses mount",
+			job: &workflow.Job{
+				RunsOn:   "ubuntu-latest",
+				Steps:    []workflow.Step{{Run: "mount /dev/sda1 /mnt"}},
+				Services: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "not eligible - uses iptables",
+			job: &workflow.Job{
+				RunsOn:   "ubuntu-latest",
+				Steps:    []workflow.Step{{Run: "iptables -A INPUT -j DROP"}},
+				Services: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "not eligible - uses sysctl",
+			job: &workflow.Job{
+				RunsOn:   "ubuntu-latest",
+				Steps:    []workflow.Step{{Run: "sysctl -w net.ipv4.ip_forward=1"}},
+				Services: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "not eligible - uses modprobe",
+			job: &workflow.Job{
+				RunsOn:   "ubuntu-latest",
+				Steps:    []workflow.Step{{Run: "sudo modprobe overlay"}},
+				Services: nil,
+			},
+			expected: false,
+		},
+		{
+			name: "eligible - amount does not match mount",
+			job: &workflow.Job{
+				RunsOn:   "ubuntu-latest",
+				Steps:    []workflow.Step{{Run: "echo amount"}},
+				Services: nil,
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -364,6 +410,20 @@ jobs:
 			expectError:   false,
 		},
 		{
+			name:     "job with privileged operations - not eligible",
+			filename: "privileged.yml",
+			content: `name: privileged
+on: push
+jobs:
+  setup-network:
+    runs-on: ubuntu-latest
+    steps:
+      - run: iptables -A INPUT -p tcp --dport 80 -j ACCEPT`,
+			expectedCount: 0,
+			expectedJobs:  []string{},
+			expectError:   false,
+		},
+		{
 			name:     "multiple jobs - mixed eligibility",
 			filename: "mixed.yml",
 			content: `name: mixed
@@ -453,6 +513,79 @@ on: push`,
 
 				if len(jobNames) != len(tt.expectedJobs) {
 					t.Errorf("Scan() returned %d unique jobs, want %d", len(jobNames), len(tt.expectedJobs))
+				}
+			}
+		})
+	}
+}
+
+func TestCheckEligibility_PrivilegedOperations(t *testing.T) {
+	tests := []struct {
+		name           string
+		job            *workflow.Job
+		wantEligible   bool
+		wantReasonPart string // substring expected in one of the reasons
+	}{
+		{
+			name: "eligible - no privileged ops",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps:  []workflow.Step{{Run: "echo hello"}},
+			},
+			wantEligible:   true,
+			wantReasonPart: "",
+		},
+		{
+			name: "not eligible - mount",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps:  []workflow.Step{{Run: "mount /dev/sda1 /mnt"}},
+			},
+			wantEligible:   false,
+			wantReasonPart: "uses privileged operations (mount)",
+		},
+		{
+			name: "not eligible - multiple privileged commands",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []workflow.Step{
+					{Run: "mount /dev/sda1 /mnt"},
+					{Run: "sysctl -w net.ipv4.ip_forward=1"},
+				},
+			},
+			wantEligible:   false,
+			wantReasonPart: "uses privileged operations",
+		},
+		{
+			name: "not eligible - privileged ops combined with docker",
+			job: &workflow.Job{
+				RunsOn: "ubuntu-latest",
+				Steps: []workflow.Step{
+					{Run: "docker build -t app ."},
+					{Run: "iptables -A INPUT -j DROP"},
+				},
+			},
+			wantEligible:   false,
+			wantReasonPart: "uses privileged operations",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotEligible, reasons := checkEligibility(tt.job)
+			if gotEligible != tt.wantEligible {
+				t.Errorf("checkEligibility() eligible = %v, want %v", gotEligible, tt.wantEligible)
+			}
+			if tt.wantReasonPart != "" {
+				found := false
+				for _, reason := range reasons {
+					if strings.Contains(reason, tt.wantReasonPart) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("checkEligibility() reasons = %v, want reason containing %q", reasons, tt.wantReasonPart)
 				}
 			}
 		})

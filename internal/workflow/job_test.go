@@ -605,6 +605,273 @@ func TestJob_HasContainer_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestJob_HasPrivilegedOperations(t *testing.T) {
+	tests := []struct {
+		name         string
+		job          *Job
+		wantDetected bool
+		wantCmds     []string
+	}{
+		{
+			name: "no privileged operations",
+			job: &Job{
+				Steps: []Step{{Run: "echo hello"}},
+			},
+			wantDetected: false,
+			wantCmds:     nil,
+		},
+		{
+			name: "mount command",
+			job: &Job{
+				Steps: []Step{{Run: "mount /dev/sda1 /mnt"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mount"},
+		},
+		{
+			name: "umount command",
+			job: &Job{
+				Steps: []Step{{Run: "umount /mnt"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"umount"},
+		},
+		{
+			name: "modprobe command",
+			job: &Job{
+				Steps: []Step{{Run: "modprobe overlay"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"modprobe"},
+		},
+		{
+			name: "insmod command",
+			job: &Job{
+				Steps: []Step{{Run: "insmod mymodule.ko"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"insmod"},
+		},
+		{
+			name: "rmmod command",
+			job: &Job{
+				Steps: []Step{{Run: "rmmod mymodule"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"rmmod"},
+		},
+		{
+			name: "iptables command",
+			job: &Job{
+				Steps: []Step{{Run: "iptables -A INPUT -p tcp --dport 80 -j ACCEPT"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"iptables"},
+		},
+		{
+			name: "ip6tables command",
+			job: &Job{
+				Steps: []Step{{Run: "ip6tables -L"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"ip6tables"},
+		},
+		{
+			name: "nft command",
+			job: &Job{
+				Steps: []Step{{Run: "nft add table inet filter"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"nft"},
+		},
+		{
+			name: "sysctl command",
+			job: &Job{
+				Steps: []Step{{Run: "sysctl -w net.ipv4.ip_forward=1"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"sysctl"},
+		},
+		{
+			name: "unshare command",
+			job: &Job{
+				Steps: []Step{{Run: "unshare --net bash"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"unshare"},
+		},
+		{
+			name: "nsenter command",
+			job: &Job{
+				Steps: []Step{{Run: "nsenter -t 1 -m -u -i -n bash"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"nsenter"},
+		},
+		{
+			name: "cgcreate command",
+			job: &Job{
+				Steps: []Step{{Run: "cgcreate -g cpu:/mygroup"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"cgcreate"},
+		},
+		{
+			name: "cgexec command",
+			job: &Job{
+				Steps: []Step{{Run: "cgexec -g cpu:/mygroup myapp"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"cgexec"},
+		},
+		{
+			name: "mknod command",
+			job: &Job{
+				Steps: []Step{{Run: "mknod /dev/mydev c 1 3"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mknod"},
+		},
+		{
+			name: "losetup command",
+			job: &Job{
+				Steps: []Step{{Run: "losetup /dev/loop0 disk.img"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"losetup"},
+		},
+		{
+			name: "setcap command",
+			job: &Job{
+				Steps: []Step{{Run: "setcap cap_net_raw+ep /usr/bin/ping"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"setcap"},
+		},
+		{
+			name: "getcap command",
+			job: &Job{
+				Steps: []Step{{Run: "getcap /usr/bin/ping"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"getcap"},
+		},
+		{
+			name: "capsh command",
+			job: &Job{
+				Steps: []Step{{Run: "capsh --print"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"capsh"},
+		},
+		{
+			name: "false positive - amount should not match mount",
+			job: &Job{
+				Steps: []Step{{Run: "echo amount"}},
+			},
+			wantDetected: false,
+			wantCmds:     nil,
+		},
+		{
+			name: "false positive - sysctld should not match sysctl",
+			job: &Job{
+				Steps: []Step{{Run: "echo sysctld"}},
+			},
+			wantDetected: false,
+			wantCmds:     nil,
+		},
+		{
+			name: "sudo prefix",
+			job: &Job{
+				Steps: []Step{{Run: "sudo mount /dev/sda1 /mnt"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mount"},
+		},
+		{
+			name: "case insensitive",
+			job: &Job{
+				Steps: []Step{{Run: "MOUNT /dev/sda1 /mnt"}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mount"},
+		},
+		{
+			name: "multiple steps with different commands",
+			job: &Job{
+				Steps: []Step{
+					{Run: "mount /dev/sda1 /mnt"},
+					{Run: "sysctl -w net.ipv4.ip_forward=1"},
+				},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mount", "sysctl"},
+		},
+		{
+			name: "duplicate commands across steps",
+			job: &Job{
+				Steps: []Step{
+					{Run: "mount /dev/sda1 /mnt"},
+					{Run: "mount /dev/sdb1 /data"},
+				},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"mount"},
+		},
+		{
+			name: "step with uses only - no run",
+			job: &Job{
+				Steps: []Step{{Uses: "actions/checkout@v4"}},
+			},
+			wantDetected: false,
+			wantCmds:     nil,
+		},
+		{
+			name: "multi-line script with privileged command",
+			job: &Job{
+				Steps: []Step{{
+					Run: `#!/bin/bash
+set -e
+echo "Setting up network"
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+echo "Done"`,
+				}},
+			},
+			wantDetected: true,
+			wantCmds:     []string{"iptables"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDetected, gotCmds := tt.job.HasPrivilegedOperations()
+			if gotDetected != tt.wantDetected {
+				t.Errorf("HasPrivilegedOperations() detected = %v, want %v", gotDetected, tt.wantDetected)
+			}
+			if tt.wantCmds == nil {
+				if gotCmds != nil && len(gotCmds) > 0 {
+					t.Errorf("HasPrivilegedOperations() cmds = %v, want nil/empty", gotCmds)
+				}
+			} else {
+				if len(gotCmds) != len(tt.wantCmds) {
+					t.Errorf("HasPrivilegedOperations() cmds count = %d, want %d: got=%v, want=%v",
+						len(gotCmds), len(tt.wantCmds), gotCmds, tt.wantCmds)
+					return
+				}
+				gotMap := make(map[string]bool)
+				for _, cmd := range gotCmds {
+					gotMap[cmd] = true
+				}
+				for _, want := range tt.wantCmds {
+					if !gotMap[want] {
+						t.Errorf("HasPrivilegedOperations() missing expected cmd: %s, got=%v", want, gotCmds)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestJob_CombinedChecks(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -614,6 +881,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 		wantDockerAct bool
 		wantServices  bool
 		wantContainer bool
+		wantPrivOps   bool
 	}{
 		{
 			name: "fully eligible job",
@@ -628,6 +896,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: false,
 			wantServices:  false,
 			wantContainer: false,
+			wantPrivOps:   false,
 		},
 		{
 			name: "job with docker command",
@@ -642,6 +911,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: false,
 			wantServices:  false,
 			wantContainer: false,
+			wantPrivOps:   false,
 		},
 		{
 			name: "job with docker action",
@@ -656,6 +926,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: true,
 			wantServices:  false,
 			wantContainer: false,
+			wantPrivOps:   false,
 		},
 		{
 			name: "job with services",
@@ -672,6 +943,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: false,
 			wantServices:  true,
 			wantContainer: false,
+			wantPrivOps:   false,
 		},
 		{
 			name: "job with container",
@@ -686,6 +958,22 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: false,
 			wantServices:  false,
 			wantContainer: true,
+			wantPrivOps:   false,
+		},
+		{
+			name: "job with privileged operations",
+			job: &Job{
+				RunsOn:    "ubuntu-latest",
+				Steps:     []Step{{Run: "mount /dev/sda1 /mnt"}},
+				Services:  nil,
+				Container: nil,
+			},
+			wantUbuntu:    true,
+			wantDockerCmd: false,
+			wantDockerAct: false,
+			wantServices:  false,
+			wantContainer: false,
+			wantPrivOps:   true,
 		},
 		{
 			name: "job with all disqualifiers",
@@ -694,6 +982,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 				Steps: []Step{
 					{Run: "docker build -t app ."},
 					{Uses: "docker/build-push-action@v6"},
+					{Run: "iptables -A INPUT -j DROP"},
 				},
 				Services: map[string]any{
 					"postgres": map[string]any{},
@@ -705,6 +994,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: true,
 			wantServices:  true,
 			wantContainer: true,
+			wantPrivOps:   true,
 		},
 		{
 			name: "non-ubuntu runner",
@@ -719,6 +1009,7 @@ func TestJob_CombinedChecks(t *testing.T) {
 			wantDockerAct: false,
 			wantServices:  false,
 			wantContainer: false,
+			wantPrivOps:   false,
 		},
 	}
 
@@ -738,6 +1029,9 @@ func TestJob_CombinedChecks(t *testing.T) {
 			}
 			if got := tt.job.HasContainer(); got != tt.wantContainer {
 				t.Errorf("HasContainer() = %v, want %v", got, tt.wantContainer)
+			}
+			if gotPrivOps, _ := tt.job.HasPrivilegedOperations(); gotPrivOps != tt.wantPrivOps {
+				t.Errorf("HasPrivilegedOperations() = %v, want %v", gotPrivOps, tt.wantPrivOps)
 			}
 		})
 	}

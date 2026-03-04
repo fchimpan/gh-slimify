@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fchimpan/gh-slimify/internal/api"
@@ -178,7 +179,12 @@ func checkEligibility(job *workflow.Job) (bool, []string) {
 		reasons = append(reasons, "uses container syntax")
 	}
 
-	// Criterion 6: Duration check will be done via GitHub API
+	// Criterion 6: Must not use privileged operations
+	if hasPrivOps, privCmds := job.HasPrivilegedOperations(); hasPrivOps {
+		reasons = append(reasons, fmt.Sprintf("uses privileged operations (%s)", strings.Join(privCmds, ", ")))
+	}
+
+	// Criterion 7: Duration check will be done via GitHub API
 	// Duration is fetched after eligibility check to avoid blocking on API calls
 
 	if len(reasons) > 0 {
