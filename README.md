@@ -18,7 +18,7 @@
 > 2. Skip any job that uses service containers (`jobs.<job_id>.services`).
 > 3. Skip any job already running inside a container (`jobs.<job_id>.container`).
 > 4. Skip any job whose setup steps provision an environment that assumes a non-container host.
-> 5. Skip any job whose run scripts rely on host-only commands or elevated system privileges that containers cannot provide (e.g., `systemctl`, `systemd`, etc.).
+> 5. Skip any job whose run scripts rely on host-only commands or elevated system privileges that containers cannot provide (e.g., `mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, `systemctl`, `systemd`, etc.).
 > 6. Skip any job whose execution time exceeds 15 minutes. Use the GitHub CLI to check the duration of the most recent successful run. Example commands:
 > 
 >    ```bash
@@ -45,6 +45,7 @@ GitHub Actions recently [introduced the lightweight `ubuntu-slim` runner](https:
 - ❌ Jobs using `services:` containers are incompatible
 - ❌ Jobs exceeding 15 minutes will fail
 - ❌ Container-based GitHub Actions are not supported
+- ❌ Jobs using privileged operations (e.g., `mount`, `iptables`, `modprobe`) are incompatible
 
 **`gh-slimify` automates this entire process**, analyzing your workflows and safely migrating eligible jobs with a single command.
 
@@ -228,7 +229,8 @@ A job is eligible for migration to `ubuntu-slim` if **all** of the following con
 3. ✅ Does **not** use Docker-based GitHub Actions (e.g., `docker/build-push-action`, `docker/login-action`)
 4. ✅ Does **not** use `services:` containers (PostgreSQL, Redis, MySQL, etc.)
 5. ✅ Does **not** use `container:` syntax (jobs running inside Docker containers)
-6. ✅ Latest workflow run duration is **under 15 minutes** (checked via GitHub API)
+6. ✅ Does **not** use privileged operations (`mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, etc.)
+7. ✅ Latest workflow run duration is **under 15 minutes** (checked via GitHub API)
 7. ⚠️ Jobs using commands that exist in `ubuntu-latest` but not in `ubuntu-slim` (e.g. `nvm`) will be flagged with warnings but are still eligible for migration. You may need to add setup steps to install these tools in `ubuntu-slim`.
 
 > [!NOTE]
@@ -252,6 +254,7 @@ When a job cannot be migrated, the specific reason(s) are displayed, such as:
 - "uses container-based GitHub Actions"
 - "uses service containers"
 - "uses container syntax"
+- "uses privileged operations (mount, iptables, ...)"
 
 ## 📝 Examples
 
@@ -310,6 +313,20 @@ jobs:
 ```
 
 **Result:** ❌ Not eligible — Uses `container:` syntax
+
+### Example 5: Job with Privileged Operations ❌
+
+```yaml
+jobs:
+  network-test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+          sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+**Result:** ❌ Not eligible — Uses privileged operations (iptables, sysctl)
 
 ## 🛠️ How It Works
 
