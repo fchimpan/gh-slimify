@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Login to Container Registry (read-only)
         uses: docker/login-action@v4
@@ -59,7 +59,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Login to Container Registry (write)
         uses: docker/login-action@v4
@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Test Docker daemon access
         run: |
