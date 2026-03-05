@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Run Hadolint
         uses: hadolint/hadolint-action@v3.3.0
@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Build test image
         run: |
@@ -112,7 +112,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Login to Container Registry
         uses: docker/login-action@v4
@@ -159,7 +159,7 @@ jobs:
         uses: actions/checkout@v6
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       
       - name: Download Docker image artifact
         uses: actions/download-artifact@v8
