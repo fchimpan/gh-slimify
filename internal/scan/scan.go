@@ -4,11 +4,24 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/fchimpan/gh-slimify/internal/api"
 	"github.com/fchimpan/gh-slimify/internal/workflow"
+)
+
+const (
+	// SlimMaxDuration is ubuntu-slim's hard job time limit. Jobs whose last
+	// successful run exceeds it will be killed after migration, so they are
+	// reported as ineligible.
+	SlimMaxDuration = 15 * time.Minute
+
+	// SlimDurationWarnThreshold flags jobs whose last run came close to the
+	// limit. ubuntu-slim has a single vCPU and is often slower than
+	// ubuntu-latest, so a job near the limit may exceed it after migration.
+	SlimDurationWarnThreshold = 10 * time.Minute
 )
 
 // Candidate represents a job that is eligible for migration
@@ -17,8 +30,17 @@ type Candidate struct {
 	JobID           string // Job ID (the key in the jobs map)
 	JobName         string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber      int
-	Duration        string   // Will be populated from GitHub API later
-	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
+	Duration        string        // Human-readable duration, populated from GitHub API
+	RawDuration     time.Duration // Raw duration; 0 means unknown
+	MissingCommands []string      // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
+
+	usesRefs []string // uses: references of the job's steps, for Docker-action verification
+}
+
+// NearDurationLimit reports whether the job's last run came close enough to
+// ubuntu-slim's 15-minute limit that the migration deserves attention.
+func (c *Candidate) NearDurationLimit() bool {
+	return c.RawDuration > SlimDurationWarnThreshold
 }
 
 // IneligibleJob represents a job that is not eligible for migration
@@ -45,12 +67,26 @@ type ScanResult struct {
 	AlreadySlimJobs []*AlreadySlimJob
 }
 
-// Scan scans workflows and returns migration candidates and ineligible jobs
-// If paths are provided, only those files are scanned. Otherwise, all workflow files
-// in .github/workflows are scanned.
-// skipDuration, if true, skips fetching job execution durations from GitHub API.
-// verbose, if true, enables verbose output including debug warnings.
-func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error) {
+// Options controls how a scan runs.
+type Options struct {
+	// SkipDuration skips fetching job execution durations from the GitHub API.
+	SkipDuration bool
+	// Offline skips all GitHub API access: durations and remote action
+	// metadata. Detection falls back to offline heuristics.
+	Offline bool
+	// Verbose enables debug warnings on stderr.
+	Verbose bool
+
+	// resolver overrides action metadata resolution (test seam).
+	resolver actionResolver
+}
+
+// Scan scans workflows and returns migration candidates and ineligible jobs.
+// If paths are provided, only those files are scanned. Otherwise, all workflow
+// files in .github/workflows are scanned.
+func Scan(opts Options, paths ...string) (*ScanResult, error) {
+	skipDuration := opts.SkipDuration || opts.Offline
+	verbose := opts.Verbose
 	var workflows []*workflow.Workflow
 	var err error
 
@@ -86,7 +122,16 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 	var alreadySlimJobs []*AlreadySlimJob
 
 	for _, wf := range workflows {
-		for jobID, job := range wf.Jobs {
+		// Iterate jobs in a stable order so output and API calls are
+		// deterministic across runs.
+		jobIDs := make([]string, 0, len(wf.Jobs))
+		for jobID := range wf.Jobs {
+			jobIDs = append(jobIDs, jobID)
+		}
+		sort.Strings(jobIDs)
+
+		for _, jobID := range jobIDs {
+			job := wf.Jobs[jobID]
 			// Check if job is already using ubuntu-slim
 			if job.IsUbuntuSlim() {
 				alreadySlimJobs = append(alreadySlimJobs, &AlreadySlimJob{
@@ -103,12 +148,19 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 			if isEligible {
 				// Check for missing commands and include in candidate
 				missingCommands := job.GetMissingCommands()
+				var usesRefs []string
+				for _, step := range job.Steps {
+					if step.Uses != "" {
+						usesRefs = append(usesRefs, step.Uses)
+					}
+				}
 				candidates = append(candidates, &Candidate{
 					WorkflowPath:    wf.Path,
 					JobID:           jobID,
 					JobName:         job.Name,
 					LineNumber:      job.LineStart,
 					MissingCommands: missingCommands,
+					usesRefs:        usesRefs,
 				})
 			} else {
 				// Record ineligible job with reasons
@@ -123,6 +175,17 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 		}
 	}
 
+	// Verify that no remaining candidate uses a Dockerfile-based action from
+	// a publisher the prefix heuristic doesn't know. Local actions are read
+	// from disk; remote metadata is fetched unless running offline.
+	if len(candidates) > 0 {
+		resolve := opts.resolver
+		if resolve == nil {
+			resolve = defaultActionResolver(opts.Offline)
+		}
+		candidates, ineligibleJobs = verifyContainerActions(candidates, ineligibleJobs, resolve, verbose)
+	}
+
 	// Fetch duration from GitHub API for each candidate (unless skipped)
 	if !skipDuration {
 		if err := fetchDurations(candidates, verbose); err != nil {
@@ -131,6 +194,8 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 				fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
 			}
 		}
+
+		candidates, ineligibleJobs = enforceDurationLimit(candidates, ineligibleJobs)
 	}
 
 	return &ScanResult{
@@ -153,9 +218,26 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 func checkEligibility(job *workflow.Job) (bool, []string) {
 	var reasons []string
 
-	// Criterion 1: Must run on ubuntu-latest
-	if !job.IsUbuntuLatest() {
-		reasons = append(reasons, "does not run on ubuntu-latest")
+	// Criterion 0: Reusable workflow calls define their runner elsewhere.
+	if job.Uses != "" {
+		reasons = append(reasons, "calls a reusable workflow (its runner is defined in the called workflow)")
+		return false, reasons
+	}
+
+	// Criterion 1: Must run on a label ubuntu-slim can replace.
+	if job.HasExpressionRunsOn() {
+		reasons = append(reasons, "runs-on is set by an expression (e.g. matrix) and was not analyzed")
+		return false, reasons
+	}
+	if !job.IsMigratableRunner() {
+		reasons = append(reasons, "does not run on ubuntu-latest or ubuntu-24.04")
+		return false, reasons
+	}
+
+	// Criterion 1b: Multi-label runs-on targets self-hosted runners and must
+	// not be collapsed into a single GitHub-hosted label.
+	if job.HasMultipleRunnerLabels() {
+		reasons = append(reasons, "uses multiple runner labels (self-hosted runner)")
 		return false, reasons
 	}
 
@@ -200,6 +282,28 @@ func isEligible(job *workflow.Job) bool {
 	return isEligible
 }
 
+// enforceDurationLimit moves candidates whose last successful run exceeds
+// ubuntu-slim's 15-minute limit into the ineligible list: such jobs would be
+// killed after migration.
+func enforceDurationLimit(candidates []*Candidate, ineligibleJobs []*IneligibleJob) ([]*Candidate, []*IneligibleJob) {
+	remaining := candidates[:0]
+	for _, c := range candidates {
+		if c.RawDuration > SlimMaxDuration {
+			ineligibleJobs = append(ineligibleJobs, &IneligibleJob{
+				WorkflowPath: c.WorkflowPath,
+				JobID:        c.JobID,
+				JobName:      c.JobName,
+				LineNumber:   c.LineNumber,
+				Reasons: []string{fmt.Sprintf(
+					"last execution time (%s) exceeds ubuntu-slim's 15-minute limit", c.Duration)},
+			})
+			continue
+		}
+		remaining = append(remaining, c)
+	}
+	return remaining, ineligibleJobs
+}
+
 // fetchDurations fetches job execution durations from GitHub API
 // verbose, if true, enables verbose output including debug warnings.
 func fetchDurations(candidates []*Candidate, verbose bool) error {
@@ -233,6 +337,7 @@ func fetchDurations(candidates []*Candidate, verbose bool) error {
 		}
 
 		// Format duration as human-readable string
+		candidate.RawDuration = duration.Duration
 		candidate.Duration = formatDuration(duration.Duration)
 	}
 

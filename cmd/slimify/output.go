@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func classifyCandidates(candidates []*scan.Candidate) (safe, warning []*scan.Can
 		if duration == "" {
 			duration = "unknown"
 		}
-		if len(job.MissingCommands) > 0 || duration == "unknown" {
+		if len(job.MissingCommands) > 0 || duration == "unknown" || job.NearDurationLimit() {
 			warning = append(warning, job)
 		} else {
 			safe = append(safe, job)
@@ -138,6 +139,9 @@ func printScanJSON(result *scan.ScanResult) {
 		}
 		if duration == "unknown" {
 			details = append(details, "Last execution time is unknown.")
+		}
+		if job.NearDurationLimit() {
+			details = append(details, fmt.Sprintf("Last execution time (%s) is close to ubuntu-slim's 15-minute limit; the 1 vCPU runner may be slower.", job.Duration))
 		}
 
 		jobs = append(jobs, scanJobJSON{
@@ -222,7 +226,7 @@ func printScanText(result *scan.ScanResult) {
 		alreadySlimMap[job.WorkflowPath] = append(alreadySlimMap[job.WorkflowPath], job)
 	}
 
-	// Display results grouped by workflow file
+	// Display results grouped by workflow file, in a stable order
 	allWorkflowPaths := make(map[string]bool)
 	for path := range workflowMap {
 		allWorkflowPaths[path] = true
@@ -233,8 +237,13 @@ func printScanText(result *scan.ScanResult) {
 	for path := range alreadySlimMap {
 		allWorkflowPaths[path] = true
 	}
+	sortedPaths := make([]string, 0, len(allWorkflowPaths))
+	for path := range allWorkflowPaths {
+		sortedPaths = append(sortedPaths, path)
+	}
+	sort.Strings(sortedPaths)
 
-	for workflowPath := range allWorkflowPaths {
+	for _, workflowPath := range sortedPaths {
 		fmt.Printf("\n📄 %s\n", workflowPath)
 		jobs := workflowMap[workflowPath]
 
@@ -263,17 +272,13 @@ func printScanText(result *scan.ScanResult) {
 				// Build warning reasons in a single line
 				var reasons []string
 				if len(job.MissingCommands) > 0 {
-					commandsStr := ""
-					for i, cmd := range job.MissingCommands {
-						if i > 0 {
-							commandsStr += ", "
-						}
-						commandsStr += cmd
-					}
-					reasons = append(reasons, fmt.Sprintf("Setup may be required (%s)", commandsStr))
+					reasons = append(reasons, fmt.Sprintf("Setup may be required (%s)", strings.Join(job.MissingCommands, ", ")))
 				}
 				if duration == "unknown" {
 					reasons = append(reasons, "Last execution time: unknown")
+				}
+				if job.NearDurationLimit() {
+					reasons = append(reasons, "Close to the 15-minute limit (1 vCPU may be slower)")
 				}
 
 				warningMsg := ""

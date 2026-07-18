@@ -58,7 +58,7 @@ gh extension install fchimpan/gh-slimify
 ```
 
 > [!NOTE]
-> At the time of writing, GitHub has not officially published a list of tools pre-installed on `ubuntu-slim` runners. Therefore, the tool detection for missing commands is **uncertain** and based on assumptions. The tool may incorrectly flag commands as missing (false positives) or miss commands that are actually missing (false negatives). Always verify manually before migrating critical workflows.
+> The built-in list of tools pre-installed on `ubuntu-slim` is a snapshot of the runner image and may drift as GitHub updates it weekly. See the official [ubuntu-slim installed software list](https://github.com/actions/runner-images/blob/main/images/ubuntu-slim/ubuntu-slim-Readme.md) for the current state, and always verify manually before migrating critical workflows.
 
 ## 🚀 Quick Start
 
@@ -198,6 +198,14 @@ Skip fetching job durations from GitHub API. This is useful for:
 gh slimify --skip-duration
 ```
 
+### Offline Mode
+
+Skip **all** GitHub API access — job durations and remote action metadata. Docker-action detection falls back to offline heuristics (`docker/` prefix, `docker://` images, local `action.yml` files); execution times are reported as unknown.
+
+```bash
+gh slimify --offline --all
+```
+
 Use the `--verbose` flag to enable debug output, which can help troubleshoot issues with API calls or workflow parsing:
 
 ```bash
@@ -290,14 +298,14 @@ gh slimify --json --all --skip-duration
 
 A job is eligible for migration to `ubuntu-slim` if **all** of the following conditions are met:
 
-1. ✅ Runs on `ubuntu-latest`
-2. ✅ Does **not** use Docker commands (`docker build`, `docker run`, `docker compose`, etc.)
-3. ✅ Does **not** use Docker-based GitHub Actions (e.g., `docker/build-push-action`, `docker/login-action`)
+1. ✅ Runs on `ubuntu-latest` or `ubuntu-24.04` with a single label (multi-label `runs-on` arrays target self-hosted runners and are skipped; reusable workflow calls and expression-based `runs-on` such as `${{ matrix.os }}` are reported with their own reasons)
+2. ✅ Does **not** invoke container tooling — `docker` with **any** subcommand (`build`, `buildx`, `run`, `load`, `save`, ...), `docker-compose`, `podman`, `nerdctl`, `buildah` — including invocations passed to `bash -c`, `eval`, or heredocs. Run scripts are parsed as shell, so command names inside comments or string arguments do not cause false positives.
+3. ✅ Does **not** use Docker-based GitHub Actions. The `docker/` organization and `docker://` images are detected offline; for other publishers the tool fetches each action's metadata (`runs.using: docker`) from the GitHub API — catching Dockerfile-based actions like `super-linter/super-linter` or `hadolint/hadolint-action` — and follows nested composite actions. Local actions (`uses: ./path`) are read from disk. If metadata cannot be fetched (offline, rate limit), detection falls back to the prefix heuristics.
 4. ✅ Does **not** use `services:` containers (PostgreSQL, Redis, MySQL, etc.)
 5. ✅ Does **not** use `container:` syntax (jobs running inside Docker containers)
-6. ✅ Does **not** use privileged operations (`mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, etc.)
-7. ✅ Latest workflow run duration is **under 15 minutes** (checked via GitHub API)
-7. ⚠️ Jobs using commands that exist in `ubuntu-latest` but not in `ubuntu-slim` (e.g. `nvm`) will be flagged with warnings but are still eligible for migration. You may need to add setup steps to install these tools in `ubuntu-slim`.
+6. ✅ Does **not** invoke privileged operations (`mount`, `iptables`, `modprobe`, `sysctl`, `nsenter`, etc.)
+7. ✅ Latest successful run duration is **under 15 minutes** (checked via GitHub API). Jobs over the limit are reported as **cannot migrate**; jobs over 10 minutes are flagged with a warning because ubuntu-slim's single vCPU is often slower than ubuntu-latest.
+8. ⚠️ Jobs using commands that exist in `ubuntu-latest` but not in `ubuntu-slim` will be flagged with warnings but are still eligible for migration. You may need to add setup steps to install these tools in `ubuntu-slim`.
 
 > [!NOTE]
 > **Setup Action Detection**: If a job uses popular setup actions from GitHub Marketplace (e.g., `actions/setup-go`,`hashicorp/setup-terraform`), the commands provided by those actions (e.g., `go`, `terraform`) will **not** be flagged as missing. This is because these setup actions install the necessary tools, making the job safe to migrate. The tool recognizes setup actions from GitHub Marketplace's verified creators, including official GitHub actions and popular third-party actions.
@@ -308,19 +316,24 @@ If any condition is violated, the job will **not** be migrated.
 
 Jobs are classified into three categories:
 
-- **✅ Safe to migrate**: No missing commands and execution time is known
-- **⚠️ Can migrate but requires attention**: Has missing commands or execution time is unknown
-- **❌ Cannot migrate**: Does not meet migration criteria (e.g., uses Docker commands, uses service containers, uses container syntax, does not run on ubuntu-latest)
+- **✅ Safe to migrate**: No missing commands, execution time is known and comfortably under the limit
+- **⚠️ Can migrate but requires attention**: Has missing commands, execution time is unknown, or the last run exceeded 10 minutes (close to the 15-minute limit on a slower 1 vCPU runner)
+- **❌ Cannot migrate**: Does not meet migration criteria (e.g., uses Docker commands, uses service containers, uses container syntax, does not run on ubuntu-latest, last execution time exceeds the 15-minute limit)
 
 Missing commands are tools that exist in `ubuntu-latest` but need to be installed in `ubuntu-slim` (e.g., `nvm`). These jobs can still be migrated, but you may need to add setup steps to install the required tools.
 
 When a job cannot be migrated, the specific reason(s) are displayed, such as:
-- "does not run on ubuntu-latest"
+- "does not run on ubuntu-latest or ubuntu-24.04"
+- "calls a reusable workflow (its runner is defined in the called workflow)"
+- "runs-on is set by an expression (e.g. matrix) and was not analyzed"
+- "uses multiple runner labels (self-hosted runner)"
 - "uses Docker commands"
 - "uses container-based GitHub Actions"
+- "uses Docker container action(s) (hadolint/hadolint-action@v3.1.0)"
 - "uses service containers"
 - "uses container syntax"
 - "uses privileged operations (mount, iptables, ...)"
+- "last execution time (23m) exceeds ubuntu-slim's 15-minute limit"
 
 ## 📝 Examples
 

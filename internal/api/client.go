@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,11 @@ type Client struct {
 	host       string
 	owner      string
 	repo       string
+
+	// Response caches: multiple jobs in one workflow share the same runs
+	// list and per-run jobs list, so each is fetched at most once per scan.
+	runsCache map[string][]workflowRun
+	jobsCache map[int64]*jobsResponse
 }
 
 // NewClient creates a new GitHub API client
@@ -25,8 +31,9 @@ func NewClient(host, owner, repo string) (*Client, error) {
 		host = "github.com"
 	}
 
-	// Create REST client with automatic authentication from gh CLI
-	restClient, err := api.DefaultRESTClient()
+	// Create REST client authenticated via the gh CLI, pinned to the host
+	// parsed from the git remote so GitHub Enterprise remotes work too.
+	restClient, err := api.NewRESTClient(api.ClientOptions{Host: host})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST client: %w", err)
 	}
@@ -36,6 +43,8 @@ func NewClient(host, owner, repo string) (*Client, error) {
 		host:       host,
 		owner:      owner,
 		repo:       repo,
+		runsCache:  make(map[string][]workflowRun),
+		jobsCache:  make(map[int64]*jobsResponse),
 	}, nil
 }
 
@@ -58,7 +67,8 @@ func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobID, jobDis
 		return nil, fmt.Errorf("no workflow runs found")
 	}
 
-	// Try to find the job in the latest successful run
+	// Try to find the job in the latest successful run. The runs endpoint is
+	// already filtered to successful runs, but keep the guard for safety.
 	for _, run := range runs {
 		if run.Status != "completed" || run.Conclusion != "success" {
 			continue
@@ -91,6 +101,7 @@ type workflowRunsResponse struct {
 type job struct {
 	Name        string `json:"name"`
 	Status      string `json:"status"`
+	Conclusion  string `json:"conclusion"`
 	StartedAt   string `json:"started_at"`
 	CompletedAt string `json:"completed_at"`
 }
@@ -103,12 +114,14 @@ type jobsResponse struct {
 // getJobDurationFromRun gets the duration of a specific job from a workflow run
 // jobID is the key in the jobs map, jobDisplayName is the custom display name or job ID if not specified
 func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, jobDisplayName string) (*JobDuration, error) {
-	path := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", c.owner, c.repo, runID)
-
-	var response jobsResponse
-	err := c.restClient.Get(path, &response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch jobs: %w", err)
+	response, ok := c.jobsCache[runID]
+	if !ok {
+		path := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", c.owner, c.repo, runID)
+		response = &jobsResponse{}
+		if err := c.restClient.Get(path, response); err != nil {
+			return nil, fmt.Errorf("failed to fetch jobs: %w", err)
+		}
+		c.jobsCache[runID] = response
 	}
 
 	// GitHub API returns jobs with their display name in the "name" field.
@@ -120,6 +133,12 @@ func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, 
 	// we try the display name first, then fallback to the job ID in case the job
 	// doesn't have a custom name field set.
 	for _, j := range response.Jobs {
+		// Only successful jobs have meaningful durations; a skipped job in a
+		// successful run would otherwise report a near-zero duration.
+		if j.Conclusion != "success" {
+			continue
+		}
+
 		// Match by display name (case-insensitive)
 		if strings.EqualFold(j.Name, jobDisplayName) {
 			return parseJobDuration(&j, jobDisplayName)
@@ -174,12 +193,26 @@ func GetRepoInfo() (host, owner, repo string, err error) {
 	// Support formats:
 	// - https://github.com/owner/repo.git
 	// - git@github.com:owner/repo.git
+	// - ssh://git@github.com/owner/repo.git
 	// - https://github.com/owner/repo
 	// - git@github.com:owner/repo
 
 	host = "github.com"
 
-	if strings.HasPrefix(remoteURL, "https://") {
+	if strings.HasPrefix(remoteURL, "ssh://") {
+		// ssh://git@github.com/owner/repo.git
+		rest := strings.TrimPrefix(remoteURL, "ssh://")
+		if at := strings.Index(rest, "@"); at >= 0 {
+			rest = rest[at+1:]
+		}
+		parts := strings.Split(rest, "/")
+		if len(parts) >= 3 {
+			// Strip an optional :port from the host
+			host = strings.SplitN(parts[0], ":", 2)[0]
+			owner = parts[1]
+			repo = strings.TrimSuffix(parts[2], ".git")
+		}
+	} else if strings.HasPrefix(remoteURL, "https://") {
 		// https://github.com/owner/repo.git or https://github.com/owner/repo
 		parts := strings.Split(strings.TrimPrefix(remoteURL, "https://"), "/")
 		if len(parts) >= 3 {
@@ -208,13 +241,18 @@ func GetRepoInfo() (host, owner, repo string, err error) {
 	return host, owner, repo, nil
 }
 
-// getWorkflowRuns gets workflow runs for a specific workflow file
+// getWorkflowRuns gets the latest successful runs for a specific workflow file
 func (c *Client) getWorkflowRuns(_ context.Context, workflowPath string) ([]workflowRun, error) {
+	if runs, ok := c.runsCache[workflowPath]; ok {
+		return runs, nil
+	}
+
 	// Use the full workflow path (e.g., ".github/workflows/ci.yaml")
-	// GitHub API accepts both workflow ID and workflow path
-	// URL encode the path for the API call
-	encodedPath := strings.ReplaceAll(workflowPath, "/", "%2F")
-	path := fmt.Sprintf("repos/%s/%s/actions/workflows/%s/runs?per_page=10", c.owner, c.repo, encodedPath)
+	// GitHub API accepts both workflow ID and workflow path.
+	// Filter to successful runs so a streak of recent failures doesn't hide
+	// the duration information.
+	encodedPath := url.PathEscape(workflowPath)
+	path := fmt.Sprintf("repos/%s/%s/actions/workflows/%s/runs?status=success&per_page=10", c.owner, c.repo, encodedPath)
 
 	var response workflowRunsResponse
 	err := c.restClient.Get(path, &response)
@@ -222,5 +260,6 @@ func (c *Client) getWorkflowRuns(_ context.Context, workflowPath string) ([]work
 		return nil, fmt.Errorf("failed to fetch workflow runs: %w", err)
 	}
 
-	return response.WorkflowRuns, nil
+	c.runsCache[workflowPath] = response.WorkflowRuns
+	return c.runsCache[workflowPath], nil
 }

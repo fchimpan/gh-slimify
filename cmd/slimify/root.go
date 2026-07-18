@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -15,10 +16,20 @@ var (
 	workflowFiles []string
 	scanAll       bool
 	skipDuration  bool
+	offline       bool
 	verbose       bool
 	force         bool
 	jsonOutput    bool
 )
+
+// scanOptions builds scan.Options from the global flags.
+func scanOptions() scan.Options {
+	return scan.Options{
+		SkipDuration: skipDuration,
+		Offline:      offline,
+		Verbose:      verbose,
+	}
+}
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -36,6 +47,7 @@ workflows in .github/workflows/*.yml.`,
 	rootCmd.PersistentFlags().StringArrayVarP(&workflowFiles, "file", "f", []string{}, "Specify workflow file(s) to process. Can be specified multiple times (e.g., -f .github/workflows/ci.yml -f .github/workflows/test.yml)")
 	rootCmd.PersistentFlags().BoolVar(&scanAll, "all", false, "Scan all workflow files in .github/workflows/*.yml")
 	rootCmd.PersistentFlags().BoolVar(&skipDuration, "skip-duration", false, "Skip fetching job execution durations from GitHub API to avoid unnecessary API calls")
+	rootCmd.PersistentFlags().BoolVar(&offline, "offline", false, "Skip all GitHub API access (durations and action metadata); detection falls back to offline heuristics")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output including debug warnings")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 
@@ -90,7 +102,7 @@ func runScan(cmd *cobra.Command, args []string) {
 		sp.Suffix = " Scanning workflows..."
 		sp.Start()
 
-		result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+		result, err := scan.Scan(scanOptions(), filesToScan...)
 		sp.Stop()
 
 		if err != nil {
@@ -105,7 +117,7 @@ func runScan(cmd *cobra.Command, args []string) {
 	}
 
 	// JSON output path
-	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+	result, err := scan.Scan(scanOptions(), filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -122,7 +134,7 @@ func runFix(cmd *cobra.Command, args []string) {
 		sp := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
 		sp.Suffix = " Scanning workflows..."
 		sp.Start()
-		result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+		result, err := scan.Scan(scanOptions(), filesToScan...)
 		sp.Stop()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ Scan failed\n")
@@ -135,7 +147,7 @@ func runFix(cmd *cobra.Command, args []string) {
 	}
 
 	// JSON output path
-	result, err := scan.Scan(skipDuration, verbose, filesToScan...)
+	result, err := scan.Scan(scanOptions(), filesToScan...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -182,11 +194,16 @@ func runFixWithResult(result *scan.ScanResult, asJSON bool) {
 		fmt.Println()
 	}
 
-	// Group jobs by workflow file
+	// Group jobs by workflow file and process in a stable order
 	workflowMap := make(map[string][]*scan.Candidate)
 	for _, c := range jobsToUpdate {
 		workflowMap[c.WorkflowPath] = append(workflowMap[c.WorkflowPath], c)
 	}
+	workflowPaths := make([]string, 0, len(workflowMap))
+	for path := range workflowMap {
+		workflowPaths = append(workflowPaths, path)
+	}
+	sort.Strings(workflowPaths)
 
 	updatedCount := 0
 	errorCount := 0
@@ -201,7 +218,9 @@ func runFixWithResult(result *scan.ScanResult, asJSON bool) {
 	var results []updateResult
 
 	// Update each workflow file
-	for workflowPath, jobs := range workflowMap {
+	for _, workflowPath := range workflowPaths {
+		jobs := workflowMap[workflowPath]
+		sort.Slice(jobs, func(i, j int) bool { return jobs[i].LineNumber < jobs[j].LineNumber })
 		for _, job := range jobs {
 			wf, err := workflow.LoadWorkflow(workflowPath)
 			if err != nil {
@@ -226,6 +245,8 @@ func runFixWithResult(result *scan.ScanResult, asJSON bool) {
 					isNotFound:   true,
 					errorMsg:     fmt.Sprintf("job %s (ID: %s) not found in %s", job.JobName, job.JobID, workflowPath),
 				})
+				// Count as an error so text and JSON output agree on the exit code.
+				errorCount++
 				continue
 			}
 

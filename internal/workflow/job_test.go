@@ -180,7 +180,7 @@ func TestJob_HasDockerCommands_EdgeCases(t *testing.T) {
 			job: &Job{
 				Steps: []Step{{Run: "# docker build should not match"}},
 			},
-			expected: true, // Current implementation detects docker in comments too
+			expected: false, // Comments are ignored by the shell parser
 		},
 		{
 			name: "docker command with prefix",
