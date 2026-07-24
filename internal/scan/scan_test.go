@@ -477,7 +477,7 @@ on: push`,
 			}
 
 			// Run Scan (skip duration for tests to avoid API calls)
-			result, err := Scan(true, false)
+			result, err := Scan(Options{SkipDuration: true, Offline: true})
 
 			if tt.expectError && err == nil {
 				t.Errorf("Scan() expected error but got none")
@@ -610,7 +610,7 @@ func TestScan_NoWorkflowDirectory(t *testing.T) {
 		os.Chdir(originalWd)
 	}()
 
-	result, err := Scan(true, false)
+	result, err := Scan(Options{SkipDuration: true, Offline: true})
 	if err == nil {
 		t.Error("Scan() expected error when workflow directory doesn't exist")
 	}
@@ -716,7 +716,7 @@ jobs:
 		t.Fatalf("Failed to write workflow file: %v", err)
 	}
 
-	result, err := Scan(true, false)
+	result, err := Scan(Options{SkipDuration: true, Offline: true})
 	if err != nil {
 		t.Fatalf("Scan() returned error: %v", err)
 	}

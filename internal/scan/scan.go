@@ -1,14 +1,27 @@
 package scan
 
 import (
-	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/fchimpan/gh-slimify/internal/api"
 	"github.com/fchimpan/gh-slimify/internal/workflow"
+)
+
+const (
+	// SlimMaxDuration is ubuntu-slim's hard job time limit. Jobs whose last
+	// successful run exceeds it will be killed after migration, so they are
+	// reported as ineligible.
+	SlimMaxDuration = 15 * time.Minute
+
+	// SlimDurationWarnThreshold flags jobs whose last run came close to the
+	// limit. ubuntu-slim has a single vCPU and is often slower than
+	// ubuntu-latest, so a job near the limit may exceed it after migration.
+	SlimDurationWarnThreshold = 10 * time.Minute
 )
 
 // Candidate represents a job that is eligible for migration
@@ -17,8 +30,43 @@ type Candidate struct {
 	JobID           string // Job ID (the key in the jobs map)
 	JobName         string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber      int
-	Duration        string   // Will be populated from GitHub API later
-	MissingCommands []string // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
+	RawDuration     time.Duration // Last execution time from GitHub API; 0 means unknown
+	MissingCommands []string      // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
+
+	usesRefs []string // uses: references of the job's steps, for Docker-action verification
+}
+
+// NearDurationLimit reports whether the job's last run came close enough to
+// ubuntu-slim's 15-minute limit that the migration deserves attention.
+func (c *Candidate) NearDurationLimit() bool {
+	return c.RawDuration > SlimDurationWarnThreshold
+}
+
+// DurationText returns the human-readable last execution time, or "unknown".
+func (c *Candidate) DurationText() string {
+	if c.RawDuration == 0 {
+		return "unknown"
+	}
+	return formatDuration(c.RawDuration)
+}
+
+// HasWarnings reports whether migrating this job needs attention: missing
+// commands, unknown execution time, or a last run close to the 15-minute
+// limit. Classification, output rendering, and the fix flow all share this
+// predicate.
+func (c *Candidate) HasWarnings() bool {
+	return len(c.MissingCommands) > 0 || c.RawDuration == 0 || c.NearDurationLimit()
+}
+
+// toIneligible converts a demoted candidate into an ineligible record.
+func (c *Candidate) toIneligible(reasons ...string) *IneligibleJob {
+	return &IneligibleJob{
+		WorkflowPath: c.WorkflowPath,
+		JobID:        c.JobID,
+		JobName:      c.JobName,
+		LineNumber:   c.LineNumber,
+		Reasons:      reasons,
+	}
 }
 
 // IneligibleJob represents a job that is not eligible for migration
@@ -45,12 +93,23 @@ type ScanResult struct {
 	AlreadySlimJobs []*AlreadySlimJob
 }
 
-// Scan scans workflows and returns migration candidates and ineligible jobs
-// If paths are provided, only those files are scanned. Otherwise, all workflow files
-// in .github/workflows are scanned.
-// skipDuration, if true, skips fetching job execution durations from GitHub API.
-// verbose, if true, enables verbose output including debug warnings.
-func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error) {
+// Options controls how a scan runs.
+type Options struct {
+	// SkipDuration skips fetching job execution durations from the GitHub API.
+	SkipDuration bool
+	// Offline skips all GitHub API access: durations and remote action
+	// metadata. Detection falls back to offline heuristics.
+	Offline bool
+	// Verbose enables debug warnings on stderr.
+	Verbose bool
+}
+
+// Scan scans workflows and returns migration candidates and ineligible jobs.
+// If paths are provided, only those files are scanned. Otherwise, all workflow
+// files in .github/workflows are scanned.
+func Scan(opts Options, paths ...string) (*ScanResult, error) {
+	skipDuration := opts.SkipDuration || opts.Offline
+	verbose := opts.Verbose
 	var workflows []*workflow.Workflow
 	var err error
 
@@ -86,7 +145,10 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 	var alreadySlimJobs []*AlreadySlimJob
 
 	for _, wf := range workflows {
-		for jobID, job := range wf.Jobs {
+		// Iterate jobs in a stable order so output and API calls are
+		// deterministic across runs.
+		for _, jobID := range slices.Sorted(maps.Keys(wf.Jobs)) {
+			job := wf.Jobs[jobID]
 			// Check if job is already using ubuntu-slim
 			if job.IsUbuntuSlim() {
 				alreadySlimJobs = append(alreadySlimJobs, &AlreadySlimJob{
@@ -103,12 +165,19 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 			if isEligible {
 				// Check for missing commands and include in candidate
 				missingCommands := job.GetMissingCommands()
+				var usesRefs []string
+				for _, step := range job.Steps {
+					if step.Uses != "" {
+						usesRefs = append(usesRefs, step.Uses)
+					}
+				}
 				candidates = append(candidates, &Candidate{
 					WorkflowPath:    wf.Path,
 					JobID:           jobID,
 					JobName:         job.Name,
 					LineNumber:      job.LineStart,
 					MissingCommands: missingCommands,
+					usesRefs:        usesRefs,
 				})
 			} else {
 				// Record ineligible job with reasons
@@ -123,14 +192,43 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 		}
 	}
 
-	// Fetch duration from GitHub API for each candidate (unless skipped)
-	if !skipDuration {
-		if err := fetchDurations(candidates, verbose); err != nil {
-			// Log error but don't fail the scan
+	// Build the API client once; the action-metadata resolver and the
+	// duration fetch share it. Offline mode leaves it nil.
+	var client *api.Client
+	var repoErr error
+	if !opts.Offline {
+		var host, owner, repo string
+		host, owner, repo, repoErr = api.GetRepoInfo()
+		if repoErr != nil {
+			// Action metadata still resolves against the default host;
+			// only the duration fetch needs the repository.
+			host, owner, repo = "", "", ""
+		}
+		var err error
+		if client, err = api.NewClient(host, owner, repo); err != nil {
+			client = nil
 			if verbose {
-				fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: failed to create GitHub API client: %v\n", err)
 			}
 		}
+	}
+
+	// Verify that no remaining candidate uses a Dockerfile-based action from
+	// a publisher the prefix heuristic doesn't know. Local actions are read
+	// from disk; remote metadata is fetched unless running offline.
+	if len(candidates) > 0 {
+		candidates, ineligibleJobs = verifyContainerActions(candidates, ineligibleJobs, newActionResolver(client), verbose)
+	}
+
+	// Fetch duration from GitHub API for each candidate (unless skipped)
+	if !skipDuration {
+		if client != nil && repoErr == nil {
+			fetchDurations(client, candidates, verbose)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", repoErr)
+		}
+
+		candidates, ineligibleJobs = enforceDurationLimit(candidates, ineligibleJobs)
 	}
 
 	return &ScanResult{
@@ -153,9 +251,26 @@ func Scan(skipDuration bool, verbose bool, paths ...string) (*ScanResult, error)
 func checkEligibility(job *workflow.Job) (bool, []string) {
 	var reasons []string
 
-	// Criterion 1: Must run on ubuntu-latest
-	if !job.IsUbuntuLatest() {
-		reasons = append(reasons, "does not run on ubuntu-latest")
+	// Criterion 0: Reusable workflow calls define their runner elsewhere.
+	if job.Uses != "" {
+		reasons = append(reasons, "calls a reusable workflow (its runner is defined in the called workflow)")
+		return false, reasons
+	}
+
+	// Criterion 1: Must run on a label ubuntu-slim can replace.
+	if job.HasExpressionRunsOn() {
+		reasons = append(reasons, "runs-on is set by an expression (e.g. matrix) and was not analyzed")
+		return false, reasons
+	}
+	if !job.IsMigratableRunner() {
+		reasons = append(reasons, "does not run on ubuntu-latest or ubuntu-24.04")
+		return false, reasons
+	}
+
+	// Criterion 1b: Multi-label runs-on targets self-hosted runners and must
+	// not be collapsed into a single GitHub-hosted label.
+	if job.HasMultipleRunnerLabels() {
+		reasons = append(reasons, "uses multiple runner labels (self-hosted runner)")
 		return false, reasons
 	}
 
@@ -200,43 +315,37 @@ func isEligible(job *workflow.Job) bool {
 	return isEligible
 }
 
-// fetchDurations fetches job execution durations from GitHub API
-// verbose, if true, enables verbose output including debug warnings.
-func fetchDurations(candidates []*Candidate, verbose bool) error {
-	if len(candidates) == 0 {
-		return nil
+// enforceDurationLimit moves candidates whose last successful run exceeds
+// ubuntu-slim's 15-minute limit into the ineligible list: such jobs would be
+// killed after migration.
+func enforceDurationLimit(candidates []*Candidate, ineligibleJobs []*IneligibleJob) ([]*Candidate, []*IneligibleJob) {
+	remaining := candidates[:0]
+	for _, c := range candidates {
+		if c.RawDuration > SlimMaxDuration {
+			ineligibleJobs = append(ineligibleJobs, c.toIneligible(fmt.Sprintf(
+				"last execution time (%s) exceeds ubuntu-slim's 15-minute limit", c.DurationText())))
+			continue
+		}
+		remaining = append(remaining, c)
 	}
+	return remaining, ineligibleJobs
+}
 
-	// Get repository info from git remote
-	host, owner, repo, err := api.GetRepoInfo()
-	if err != nil {
-		return fmt.Errorf("failed to get repository info: %w", err)
-	}
-
-	// Create API client
-	client, err := api.NewClient(host, owner, repo)
-	if err != nil {
-		return fmt.Errorf("failed to create API client: %w", err)
-	}
-
-	ctx := context.Background()
-
-	// Fetch duration for each candidate
+// fetchDurations fetches job execution durations from the GitHub API.
+// Per-candidate failures are logged in verbose mode and leave the duration
+// unknown.
+func fetchDurations(client *api.Client, candidates []*Candidate, verbose bool) {
 	for _, candidate := range candidates {
-		duration, err := client.GetJobDuration(ctx, candidate.WorkflowPath, candidate.JobID, candidate.JobName)
+		duration, err := client.GetJobDuration(candidate.WorkflowPath, candidate.JobID, candidate.JobName)
 		if err != nil {
-			// Log error for debugging but continue to next candidate
 			if verbose {
 				fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s (ID: %s) in %s: %v\n", candidate.JobName, candidate.JobID, candidate.WorkflowPath, err)
 			}
 			continue
 		}
 
-		// Format duration as human-readable string
-		candidate.Duration = formatDuration(duration.Duration)
+		candidate.RawDuration = duration.Duration
 	}
-
-	return nil
 }
 
 // formatDuration formats a duration as a human-readable string

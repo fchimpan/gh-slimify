@@ -550,7 +550,7 @@ func TestUpdateRunsOn_Basic(t *testing.T) {
 	}
 }
 
-func TestJob_IsUbuntuLatest(t *testing.T) {
+func TestJob_IsMigratableRunner(t *testing.T) {
 	tests := []struct {
 		name     string
 		job      *Job
@@ -560,6 +560,13 @@ func TestJob_IsUbuntuLatest(t *testing.T) {
 			name: "ubuntu-latest string",
 			job: &Job{
 				RunsOn: "ubuntu-latest",
+			},
+			expected: true,
+		},
+		{
+			name: "ubuntu-24.04 string",
+			job: &Job{
+				RunsOn: "ubuntu-24.04",
 			},
 			expected: true,
 		},
@@ -602,9 +609,9 @@ func TestJob_IsUbuntuLatest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.job.IsUbuntuLatest()
+			got := tt.job.IsMigratableRunner()
 			if got != tt.expected {
-				t.Errorf("IsUbuntuLatest() = %v, want %v", got, tt.expected)
+				t.Errorf("IsMigratableRunner() = %v, want %v", got, tt.expected)
 			}
 		})
 	}

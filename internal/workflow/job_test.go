@@ -81,7 +81,7 @@ func TestJob_IsUbuntuSlim(t *testing.T) {
 	}
 }
 
-func TestJob_IsUbuntuLatest_EdgeCases(t *testing.T) {
+func TestJob_IsMigratableRunner_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
 		job      *Job
@@ -147,9 +147,9 @@ func TestJob_IsUbuntuLatest_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.job.IsUbuntuLatest()
+			got := tt.job.IsMigratableRunner()
 			if got != tt.expected {
-				t.Errorf("IsUbuntuLatest() = %v, want %v", got, tt.expected)
+				t.Errorf("IsMigratableRunner() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
@@ -180,7 +180,7 @@ func TestJob_HasDockerCommands_EdgeCases(t *testing.T) {
 			job: &Job{
 				Steps: []Step{{Run: "# docker build should not match"}},
 			},
-			expected: true, // Current implementation detects docker in comments too
+			expected: false, // Comments are ignored by the shell parser
 		},
 		{
 			name: "docker command with prefix",
@@ -1015,8 +1015,8 @@ func TestJob_CombinedChecks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.job.IsUbuntuLatest(); got != tt.wantUbuntu {
-				t.Errorf("IsUbuntuLatest() = %v, want %v", got, tt.wantUbuntu)
+			if got := tt.job.IsMigratableRunner(); got != tt.wantUbuntu {
+				t.Errorf("IsMigratableRunner() = %v, want %v", got, tt.wantUbuntu)
 			}
 			if got := tt.job.HasDockerCommands(); got != tt.wantDockerCmd {
 				t.Errorf("HasDockerCommands() = %v, want %v", got, tt.wantDockerCmd)
@@ -1405,16 +1405,16 @@ func TestJob_GetMissingCommands_RealWorkflows(t *testing.T) {
 						t.Logf("Job '%s' in %s uses missing commands: %v", jobName, wf.Path, missingCommands)
 					}
 
-					// Verify that if job is ubuntu-latest, GetMissingCommands returns results
-					// (may be empty if no missing commands are used)
-					if job.IsUbuntuLatest() {
+					// Verify that if job runs on a migratable runner, GetMissingCommands
+					// returns results (may be empty if no missing commands are used)
+					if job.IsMigratableRunner() {
 						// This is fine - the function should work without errors
 						// The actual commands depend on what's in the workflow
 						_ = missingCommands
 					} else {
-						// For non-ubuntu-latest jobs, should return nil
+						// For non-migratable jobs, should return nil
 						if missingCommands != nil {
-							t.Errorf("GetMissingCommands() should return nil for non-ubuntu-latest job, got %v", missingCommands)
+							t.Errorf("GetMissingCommands() should return nil for non-migratable job, got %v", missingCommands)
 						}
 					}
 				})
