@@ -8,10 +8,10 @@ import (
 )
 
 func TestClassifyCandidates(t *testing.T) {
-	safeJob := &scan.Candidate{JobID: "safe", Duration: "4m", RawDuration: 4 * time.Minute}
-	missingCmds := &scan.Candidate{JobID: "missing", Duration: "3m", RawDuration: 3 * time.Minute, MissingCommands: []string{"mysql"}}
+	safeJob := &scan.Candidate{JobID: "safe", RawDuration: 4 * time.Minute}
+	missingCmds := &scan.Candidate{JobID: "missing", RawDuration: 3 * time.Minute, MissingCommands: []string{"mysql"}}
 	unknownDur := &scan.Candidate{JobID: "unknown"}
-	nearLimit := &scan.Candidate{JobID: "near-limit", Duration: "12m", RawDuration: 12 * time.Minute}
+	nearLimit := &scan.Candidate{JobID: "near-limit", RawDuration: 12 * time.Minute}
 
 	safe, warning := classifyCandidates([]*scan.Candidate{safeJob, missingCmds, unknownDur, nearLimit})
 

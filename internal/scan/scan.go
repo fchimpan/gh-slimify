@@ -1,10 +1,10 @@
 package scan
 
 import (
-	"context"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,8 +30,7 @@ type Candidate struct {
 	JobID           string // Job ID (the key in the jobs map)
 	JobName         string // Job display name (name: field in YAML, or job ID if not specified)
 	LineNumber      int
-	Duration        string        // Human-readable duration, populated from GitHub API
-	RawDuration     time.Duration // Raw duration; 0 means unknown
+	RawDuration     time.Duration // Last execution time from GitHub API; 0 means unknown
 	MissingCommands []string      // Commands that exist in ubuntu-latest but need to be installed in ubuntu-slim
 
 	usesRefs []string // uses: references of the job's steps, for Docker-action verification
@@ -41,6 +40,33 @@ type Candidate struct {
 // ubuntu-slim's 15-minute limit that the migration deserves attention.
 func (c *Candidate) NearDurationLimit() bool {
 	return c.RawDuration > SlimDurationWarnThreshold
+}
+
+// DurationText returns the human-readable last execution time, or "unknown".
+func (c *Candidate) DurationText() string {
+	if c.RawDuration == 0 {
+		return "unknown"
+	}
+	return formatDuration(c.RawDuration)
+}
+
+// HasWarnings reports whether migrating this job needs attention: missing
+// commands, unknown execution time, or a last run close to the 15-minute
+// limit. Classification, output rendering, and the fix flow all share this
+// predicate.
+func (c *Candidate) HasWarnings() bool {
+	return len(c.MissingCommands) > 0 || c.RawDuration == 0 || c.NearDurationLimit()
+}
+
+// toIneligible converts a demoted candidate into an ineligible record.
+func (c *Candidate) toIneligible(reasons ...string) *IneligibleJob {
+	return &IneligibleJob{
+		WorkflowPath: c.WorkflowPath,
+		JobID:        c.JobID,
+		JobName:      c.JobName,
+		LineNumber:   c.LineNumber,
+		Reasons:      reasons,
+	}
 }
 
 // IneligibleJob represents a job that is not eligible for migration
@@ -76,9 +102,6 @@ type Options struct {
 	Offline bool
 	// Verbose enables debug warnings on stderr.
 	Verbose bool
-
-	// resolver overrides action metadata resolution (test seam).
-	resolver actionResolver
 }
 
 // Scan scans workflows and returns migration candidates and ineligible jobs.
@@ -124,13 +147,7 @@ func Scan(opts Options, paths ...string) (*ScanResult, error) {
 	for _, wf := range workflows {
 		// Iterate jobs in a stable order so output and API calls are
 		// deterministic across runs.
-		jobIDs := make([]string, 0, len(wf.Jobs))
-		for jobID := range wf.Jobs {
-			jobIDs = append(jobIDs, jobID)
-		}
-		sort.Strings(jobIDs)
-
-		for _, jobID := range jobIDs {
+		for _, jobID := range slices.Sorted(maps.Keys(wf.Jobs)) {
 			job := wf.Jobs[jobID]
 			// Check if job is already using ubuntu-slim
 			if job.IsUbuntuSlim() {
@@ -175,24 +192,40 @@ func Scan(opts Options, paths ...string) (*ScanResult, error) {
 		}
 	}
 
+	// Build the API client once; the action-metadata resolver and the
+	// duration fetch share it. Offline mode leaves it nil.
+	var client *api.Client
+	var repoErr error
+	if !opts.Offline {
+		var host, owner, repo string
+		host, owner, repo, repoErr = api.GetRepoInfo()
+		if repoErr != nil {
+			// Action metadata still resolves against the default host;
+			// only the duration fetch needs the repository.
+			host, owner, repo = "", "", ""
+		}
+		var err error
+		if client, err = api.NewClient(host, owner, repo); err != nil {
+			client = nil
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to create GitHub API client: %v\n", err)
+			}
+		}
+	}
+
 	// Verify that no remaining candidate uses a Dockerfile-based action from
 	// a publisher the prefix heuristic doesn't know. Local actions are read
 	// from disk; remote metadata is fetched unless running offline.
 	if len(candidates) > 0 {
-		resolve := opts.resolver
-		if resolve == nil {
-			resolve = defaultActionResolver(opts.Offline)
-		}
-		candidates, ineligibleJobs = verifyContainerActions(candidates, ineligibleJobs, resolve, verbose)
+		candidates, ineligibleJobs = verifyContainerActions(candidates, ineligibleJobs, newActionResolver(client), verbose)
 	}
 
 	// Fetch duration from GitHub API for each candidate (unless skipped)
 	if !skipDuration {
-		if err := fetchDurations(candidates, verbose); err != nil {
-			// Log error but don't fail the scan
-			if verbose {
-				fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", err)
-			}
+		if client != nil && repoErr == nil {
+			fetchDurations(client, candidates, verbose)
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to fetch job durations from GitHub API: %v\n", repoErr)
 		}
 
 		candidates, ineligibleJobs = enforceDurationLimit(candidates, ineligibleJobs)
@@ -289,14 +322,8 @@ func enforceDurationLimit(candidates []*Candidate, ineligibleJobs []*IneligibleJ
 	remaining := candidates[:0]
 	for _, c := range candidates {
 		if c.RawDuration > SlimMaxDuration {
-			ineligibleJobs = append(ineligibleJobs, &IneligibleJob{
-				WorkflowPath: c.WorkflowPath,
-				JobID:        c.JobID,
-				JobName:      c.JobName,
-				LineNumber:   c.LineNumber,
-				Reasons: []string{fmt.Sprintf(
-					"last execution time (%s) exceeds ubuntu-slim's 15-minute limit", c.Duration)},
-			})
+			ineligibleJobs = append(ineligibleJobs, c.toIneligible(fmt.Sprintf(
+				"last execution time (%s) exceeds ubuntu-slim's 15-minute limit", c.DurationText())))
 			continue
 		}
 		remaining = append(remaining, c)
@@ -304,44 +331,21 @@ func enforceDurationLimit(candidates []*Candidate, ineligibleJobs []*IneligibleJ
 	return remaining, ineligibleJobs
 }
 
-// fetchDurations fetches job execution durations from GitHub API
-// verbose, if true, enables verbose output including debug warnings.
-func fetchDurations(candidates []*Candidate, verbose bool) error {
-	if len(candidates) == 0 {
-		return nil
-	}
-
-	// Get repository info from git remote
-	host, owner, repo, err := api.GetRepoInfo()
-	if err != nil {
-		return fmt.Errorf("failed to get repository info: %w", err)
-	}
-
-	// Create API client
-	client, err := api.NewClient(host, owner, repo)
-	if err != nil {
-		return fmt.Errorf("failed to create API client: %w", err)
-	}
-
-	ctx := context.Background()
-
-	// Fetch duration for each candidate
+// fetchDurations fetches job execution durations from the GitHub API.
+// Per-candidate failures are logged in verbose mode and leave the duration
+// unknown.
+func fetchDurations(client *api.Client, candidates []*Candidate, verbose bool) {
 	for _, candidate := range candidates {
-		duration, err := client.GetJobDuration(ctx, candidate.WorkflowPath, candidate.JobID, candidate.JobName)
+		duration, err := client.GetJobDuration(candidate.WorkflowPath, candidate.JobID, candidate.JobName)
 		if err != nil {
-			// Log error for debugging but continue to next candidate
 			if verbose {
 				fmt.Fprintf(os.Stderr, "Warning: failed to get duration for job %s (ID: %s) in %s: %v\n", candidate.JobName, candidate.JobID, candidate.WorkflowPath, err)
 			}
 			continue
 		}
 
-		// Format duration as human-readable string
 		candidate.RawDuration = duration.Duration
-		candidate.Duration = formatDuration(duration.Duration)
 	}
-
-	return nil
 }
 
 // formatDuration formats a duration as a human-readable string

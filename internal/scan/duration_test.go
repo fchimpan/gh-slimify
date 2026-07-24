@@ -10,9 +10,9 @@ import (
 
 func TestEnforceDurationLimit(t *testing.T) {
 	candidates := []*Candidate{
-		{JobID: "fast", Duration: "4m", RawDuration: 4 * time.Minute},
-		{JobID: "near-limit", Duration: "12m", RawDuration: 12 * time.Minute},
-		{JobID: "over-limit", Duration: "23m", RawDuration: 23 * time.Minute},
+		{JobID: "fast", RawDuration: 4 * time.Minute},
+		{JobID: "near-limit", RawDuration: 12 * time.Minute},
+		{JobID: "over-limit", RawDuration: 23 * time.Minute},
 		{JobID: "unknown"}, // duration not fetched
 	}
 

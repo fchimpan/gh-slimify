@@ -1,8 +1,11 @@
 package workflow
 
 import (
+	"maps"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -107,13 +110,11 @@ var (
 	// script cannot be parsed as shell (e.g. shell: python). Broad on purpose:
 	// for the cannot-migrate checks a false positive is safer than migrating a
 	// job that needs a Docker daemon.
-	fallbackContainerPattern = regexp.MustCompile(`\b(docker|docker-compose|podman|nerdctl|buildah)\b`)
+	fallbackContainerPattern = commandAlternationPattern(containerCommands)
 
 	// privilegedCommandPattern is the parse-failure fallback for privileged
 	// operation detection.
-	privilegedCommandPattern = regexp.MustCompile(
-		`\b(mount|umount|modprobe|insmod|rmmod|iptables|ip6tables|nft|nftables|sysctl|unshare|nsenter|cgcreate|cgexec|mknod|losetup|setcap|getcap|capsh)\b`,
-	)
+	privilegedCommandPattern = commandAlternationPattern(privilegedCommands)
 
 	// githubExpressionPattern matches ${{ ... }} expressions, which are not
 	// valid shell until GitHub substitutes them at run time.
@@ -124,8 +125,32 @@ var (
 	// - docker:// image syntax (e.g., "docker://alpine:latest")
 	// - docker/ organization actions (e.g., "docker/build-push-action@v6")
 	// Future additions could include: "container://", "podman/", etc.
-	containerActionPrefixes = []string{"docker"}
+	containerActionPrefixes = []string{"docker://", "docker/"}
 )
+
+// commandAlternationPattern builds a word-boundary alternation matching any
+// key of a command set, so the parse-failure fallbacks share one source of
+// truth with the AST matchers. Longer names come first so captures prefer the
+// full command (nftables over nft).
+func commandAlternationPattern(cmds map[string]bool) *regexp.Regexp {
+	names := slices.Sorted(maps.Keys(cmds))
+	sort.SliceStable(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	for i, name := range names {
+		names[i] = regexp.QuoteMeta(name)
+	}
+	return regexp.MustCompile(`\b(` + strings.Join(names, "|") + `)\b`)
+}
+
+// IsContainerActionRef reports whether a uses: reference is container-based
+// by its prefix alone: docker:// images and docker/ organization actions.
+func IsContainerActionRef(ref string) bool {
+	for _, prefix := range containerActionPrefixes {
+		if strings.HasPrefix(ref, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // migratableRunners are the GitHub-hosted runner labels that ubuntu-slim can
 // replace. ubuntu-latest currently resolves to ubuntu-24.04, the same OS
@@ -135,26 +160,36 @@ var migratableRunners = map[string]bool{
 	"ubuntu-24.04":  true,
 }
 
+// runnerLabels returns the string labels of runs-on, handling both the
+// scalar and array forms.
+func (j *Job) runnerLabels() []string {
+	switch v := j.RunsOn.(type) {
+	case string:
+		return []string{v}
+	case []any:
+		var labels []string
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				labels = append(labels, str)
+			}
+		}
+		return labels
+	default:
+		return nil
+	}
+}
+
 // IsMigratableRunner checks if a job runs on a label that ubuntu-slim can
 // replace (ubuntu-latest or ubuntu-24.04).
 func (j *Job) IsMigratableRunner() bool {
-	if j.RunsOn == nil {
-		return false
-	}
+	return slices.ContainsFunc(j.runnerLabels(), func(label string) bool {
+		return migratableRunners[label]
+	})
+}
 
-	switch v := j.RunsOn.(type) {
-	case string:
-		return migratableRunners[v]
-	case []any:
-		for _, item := range v {
-			if str, ok := item.(string); ok && migratableRunners[str] {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
+// IsUbuntuSlim checks if a job already runs on ubuntu-slim
+func (j *Job) IsUbuntuSlim() bool {
+	return slices.Contains(j.runnerLabels(), "ubuntu-slim")
 }
 
 // HasExpressionRunsOn reports whether runs-on is set by a ${{ }} expression
@@ -162,50 +197,6 @@ func (j *Job) IsMigratableRunner() bool {
 func (j *Job) HasExpressionRunsOn() bool {
 	s, ok := j.RunsOn.(string)
 	return ok && strings.Contains(s, "${{")
-}
-
-// IsUbuntuLatest checks if a job runs on ubuntu-latest
-func (j *Job) IsUbuntuLatest() bool {
-	if j.RunsOn == nil {
-		return false
-	}
-
-	switch v := j.RunsOn.(type) {
-	case string:
-		return v == "ubuntu-latest"
-	case []any:
-		// runs-on can be a matrix or array
-		for _, item := range v {
-			if str, ok := item.(string); ok && str == "ubuntu-latest" {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-// IsUbuntuSlim checks if a job already runs on ubuntu-slim
-func (j *Job) IsUbuntuSlim() bool {
-	if j.RunsOn == nil {
-		return false
-	}
-
-	switch v := j.RunsOn.(type) {
-	case string:
-		return v == "ubuntu-slim"
-	case []any:
-		// runs-on can be a matrix or array
-		for _, item := range v {
-			if str, ok := item.(string); ok && str == "ubuntu-slim" {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
 }
 
 // HasMultipleRunnerLabels reports whether runs-on is an array with more than
@@ -472,15 +463,8 @@ func startsWithContainerCommand(v string) bool {
 // Future container tools can be added by extending containerActionPrefixes.
 func (j *Job) HasContainerActions() bool {
 	for _, step := range j.Steps {
-		if step.Uses == "" {
-			continue
-		}
-		uses := step.Uses
-		// Check if uses starts with any container action prefix
-		for _, prefix := range containerActionPrefixes {
-			if strings.HasPrefix(uses, prefix) {
-				return true
-			}
+		if step.Uses != "" && IsContainerActionRef(step.Uses) {
+			return true
 		}
 	}
 	return false

@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/fchimpan/gh-slimify/internal/scan"
 )
@@ -75,28 +75,20 @@ type updateResult struct {
 	isNotFound   bool
 }
 
-// parseDurationSeconds parses a human-readable duration string (e.g. "2m30s")
-// and returns a pointer to the total seconds. Returns nil for empty or unparseable strings.
-func parseDurationSeconds(s string) *float64 {
-	if s == "" {
+// durationSeconds returns the last execution time in seconds for JSON
+// output, or nil when unknown.
+func durationSeconds(c *scan.Candidate) *float64 {
+	if c.RawDuration == 0 {
 		return nil
 	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return nil
-	}
-	secs := d.Seconds()
+	secs := c.RawDuration.Seconds()
 	return &secs
 }
 
 // classifyCandidates splits candidates into safe and warning groups.
 func classifyCandidates(candidates []*scan.Candidate) (safe, warning []*scan.Candidate) {
 	for _, job := range candidates {
-		duration := job.Duration
-		if duration == "" {
-			duration = "unknown"
-		}
-		if len(job.MissingCommands) > 0 || duration == "unknown" || job.NearDurationLimit() {
+		if job.HasWarnings() {
 			warning = append(warning, job)
 		} else {
 			safe = append(safe, job)
@@ -123,25 +115,20 @@ func printScanJSON(result *scan.ScanResult) {
 			Status:            "safe",
 			StatusDescription: "Safe to migrate to ubuntu-slim. No missing commands and execution time is known.",
 			RecommendedAction: "migrate",
-			DurationSeconds:   parseDurationSeconds(job.Duration),
+			DurationSeconds:   durationSeconds(job),
 		})
 	}
 
 	for _, job := range warningJobs {
-		duration := job.Duration
-		if duration == "" {
-			duration = "unknown"
-		}
-
 		var details []string
 		if len(job.MissingCommands) > 0 {
 			details = append(details, fmt.Sprintf("Setup may be required for: %s.", strings.Join(job.MissingCommands, ", ")))
 		}
-		if duration == "unknown" {
+		if job.RawDuration == 0 {
 			details = append(details, "Last execution time is unknown.")
 		}
 		if job.NearDurationLimit() {
-			details = append(details, fmt.Sprintf("Last execution time (%s) is close to ubuntu-slim's 15-minute limit; the 1 vCPU runner may be slower.", job.Duration))
+			details = append(details, fmt.Sprintf("Last execution time (%s) is close to ubuntu-slim's 15-minute limit; the 1 vCPU runner may be slower.", job.DurationText()))
 		}
 
 		jobs = append(jobs, scanJobJSON{
@@ -152,7 +139,7 @@ func printScanJSON(result *scan.ScanResult) {
 			Status:            "warning",
 			StatusDescription: "Can migrate but requires attention. " + strings.Join(details, " "),
 			RecommendedAction: "review_before_migrate",
-			DurationSeconds:   parseDurationSeconds(job.Duration),
+			DurationSeconds:   durationSeconds(job),
 			MissingCommands:   job.MissingCommands,
 		})
 	}
@@ -237,13 +224,7 @@ func printScanText(result *scan.ScanResult) {
 	for path := range alreadySlimMap {
 		allWorkflowPaths[path] = true
 	}
-	sortedPaths := make([]string, 0, len(allWorkflowPaths))
-	for path := range allWorkflowPaths {
-		sortedPaths = append(sortedPaths, path)
-	}
-	sort.Strings(sortedPaths)
-
-	for _, workflowPath := range sortedPaths {
+	for _, workflowPath := range slices.Sorted(maps.Keys(allWorkflowPaths)) {
 		fmt.Printf("\n📄 %s\n", workflowPath)
 		jobs := workflowMap[workflowPath]
 
@@ -254,7 +235,7 @@ func printScanText(result *scan.ScanResult) {
 			fmt.Printf("  ✅ Safe to migrate (%d job(s)):\n", len(safeJobs))
 			for _, job := range safeJobs {
 				jobLink := formatLocalLink(workflowPath, job.LineNumber)
-				fmt.Printf("     • \"%s\" (L%d) - Last execution time: %s\n", job.JobName, job.LineNumber, job.Duration)
+				fmt.Printf("     • \"%s\" (L%d) - Last execution time: %s\n", job.JobName, job.LineNumber, job.DurationText())
 				fmt.Printf("       %s\n", jobLink)
 			}
 		}
@@ -263,10 +244,7 @@ func printScanText(result *scan.ScanResult) {
 		if len(warningJobs) > 0 {
 			fmt.Printf("  ⚠️  Can migrate but requires attention (%d job(s)):\n", len(warningJobs))
 			for _, job := range warningJobs {
-				duration := job.Duration
-				if duration == "" {
-					duration = "unknown"
-				}
+				duration := job.DurationText()
 				jobLink := formatLocalLink(workflowPath, job.LineNumber)
 
 				// Build warning reasons in a single line
@@ -280,14 +258,7 @@ func printScanText(result *scan.ScanResult) {
 				if job.NearDurationLimit() {
 					reasons = append(reasons, "Close to the 15-minute limit (1 vCPU may be slower)")
 				}
-
-				warningMsg := ""
-				if len(reasons) > 0 {
-					warningMsg = reasons[0]
-					for i := 1; i < len(reasons); i++ {
-						warningMsg += ", " + reasons[i]
-					}
-				}
+				warningMsg := strings.Join(reasons, ", ")
 
 				fmt.Printf("     • \"%s\" (L%d)\n", job.JobName, job.LineNumber)
 				if warningMsg != "" {
@@ -306,13 +277,7 @@ func printScanText(result *scan.ScanResult) {
 			fmt.Printf("  ❌ Cannot migrate (%d job(s)):\n", len(ineligibleJobsForWorkflow))
 			for _, job := range ineligibleJobsForWorkflow {
 				jobLink := formatLocalLink(workflowPath, job.LineNumber)
-				reasonsStr := ""
-				if len(job.Reasons) > 0 {
-					reasonsStr = job.Reasons[0]
-					for i := 1; i < len(job.Reasons); i++ {
-						reasonsStr += ", " + job.Reasons[i]
-					}
-				}
+				reasonsStr := strings.Join(job.Reasons, ", ")
 				fmt.Printf("     • \"%s\" (L%d)\n", job.JobName, job.LineNumber)
 				if reasonsStr != "" {
 					fmt.Printf("       ❌ %s\n", reasonsStr)
@@ -363,11 +328,21 @@ func printScanText(result *scan.ScanResult) {
 	}
 }
 
-func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErrors bool) {
+// summarizeFixResults tallies update results once; both output modes and the
+// exit-code decision share this count.
+func summarizeFixResults(results []updateResult) (updated, errors int) {
+	for _, r := range results {
+		if r.isError || r.isNotFound {
+			errors++
+		} else {
+			updated++
+		}
+	}
+	return
+}
+
+func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate) {
 	var jobs []fixJobJSON
-	updatedCount := 0
-	skippedCount := 0
-	errorCount := 0
 
 	for _, r := range results {
 		if r.isError {
@@ -381,7 +356,6 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 				RecommendedAction: "investigate_error",
 				Error:             r.errorMsg,
 			})
-			errorCount++
 		} else if r.isNotFound {
 			jobs = append(jobs, fixJobJSON{
 				WorkflowPath:      r.workflowPath,
@@ -393,7 +367,6 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 				RecommendedAction: "investigate_error",
 				Error:             r.errorMsg,
 			})
-			errorCount++
 		} else if r.hasWarnings {
 			jobs = append(jobs, fixJobJSON{
 				WorkflowPath:      r.workflowPath,
@@ -405,7 +378,6 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 				RecommendedAction: "verify_workflow_carefully",
 				HasWarnings:       true,
 			})
-			updatedCount++
 		} else {
 			jobs = append(jobs, fixJobJSON{
 				WorkflowPath:      r.workflowPath,
@@ -416,7 +388,6 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 				StatusDescription: "Successfully updated to ubuntu-slim.",
 				RecommendedAction: "verify_workflow",
 			})
-			updatedCount++
 		}
 	}
 
@@ -431,18 +402,18 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 			RecommendedAction: "review_then_force",
 			HasWarnings:       true,
 		})
-		skippedCount++
 	}
 
 	if jobs == nil {
 		jobs = []fixJobJSON{}
 	}
 
+	updatedCount, errorCount := summarizeFixResults(results)
 	output := fixOutputJSON{
 		Jobs: jobs,
 		Summary: fixSummaryJSON{
 			Updated: updatedCount,
-			Skipped: skippedCount,
+			Skipped: len(skippedJobs),
 			Errors:  errorCount,
 		},
 	}
@@ -451,12 +422,13 @@ func printFixJSON(results []updateResult, skippedJobs []*scan.Candidate, hasErro
 	enc.SetIndent("", "  ")
 	enc.Encode(output)
 
-	if hasErrors {
+	if errorCount > 0 {
 		os.Exit(1)
 	}
 }
 
-func printFixText(results []updateResult, updatedCount, errorCount int) {
+func printFixText(results []updateResult) {
+	updatedCount, errorCount := summarizeFixResults(results)
 	if errorCount > 0 {
 		fmt.Fprintf(os.Stderr, "✗ Update completed with errors\n")
 	} else {

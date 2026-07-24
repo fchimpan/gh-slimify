@@ -180,8 +180,9 @@ func TestLoadLocalActionMetadata(t *testing.T) {
 	}
 }
 
-func TestDefaultActionResolver_Offline(t *testing.T) {
-	resolve := defaultActionResolver(true)
+func TestActionResolver_Offline(t *testing.T) {
+	// A nil client means offline: remote lookups are skipped.
+	resolve := newActionResolver(nil)
 
 	if _, err := resolve("acme/tool@v1"); !errors.Is(err, errOfflineResolution) {
 		t.Errorf("remote resolution offline: err = %v, want errOfflineResolution", err)

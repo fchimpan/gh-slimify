@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -56,9 +55,9 @@ type JobDuration struct {
 
 // GetJobDuration gets the latest execution duration for a specific job in a workflow
 // jobID is the key in the jobs map, jobDisplayName is the custom display name or job ID if not specified
-func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobID, jobDisplayName string) (*JobDuration, error) {
+func (c *Client) GetJobDuration(workflowPath, jobID, jobDisplayName string) (*JobDuration, error) {
 	// Get workflow runs
-	runs, err := c.getWorkflowRuns(ctx, workflowPath)
+	runs, err := c.getWorkflowRuns(workflowPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow runs: %w", err)
 	}
@@ -74,7 +73,7 @@ func (c *Client) GetJobDuration(ctx context.Context, workflowPath, jobID, jobDis
 			continue
 		}
 
-		duration, err := c.getJobDurationFromRun(ctx, run.ID, jobID, jobDisplayName)
+		duration, err := c.getJobDurationFromRun(run.ID, jobID, jobDisplayName)
 		if err != nil {
 			// Continue to next run if job not found in this run
 			continue
@@ -113,7 +112,7 @@ type jobsResponse struct {
 
 // getJobDurationFromRun gets the duration of a specific job from a workflow run
 // jobID is the key in the jobs map, jobDisplayName is the custom display name or job ID if not specified
-func (c *Client) getJobDurationFromRun(ctx context.Context, runID int64, jobID, jobDisplayName string) (*JobDuration, error) {
+func (c *Client) getJobDurationFromRun(runID int64, jobID, jobDisplayName string) (*JobDuration, error) {
 	response, ok := c.jobsCache[runID]
 	if !ok {
 		path := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", c.owner, c.repo, runID)
@@ -199,26 +198,16 @@ func GetRepoInfo() (host, owner, repo string, err error) {
 
 	host = "github.com"
 
-	if strings.HasPrefix(remoteURL, "ssh://") {
-		// ssh://git@github.com/owner/repo.git
-		rest := strings.TrimPrefix(remoteURL, "ssh://")
-		if at := strings.Index(rest, "@"); at >= 0 {
-			rest = rest[at+1:]
-		}
-		parts := strings.Split(rest, "/")
-		if len(parts) >= 3 {
-			// Strip an optional :port from the host
-			host = strings.SplitN(parts[0], ":", 2)[0]
-			owner = parts[1]
-			repo = strings.TrimSuffix(parts[2], ".git")
-		}
-	} else if strings.HasPrefix(remoteURL, "https://") {
-		// https://github.com/owner/repo.git or https://github.com/owner/repo
-		parts := strings.Split(strings.TrimPrefix(remoteURL, "https://"), "/")
-		if len(parts) >= 3 {
-			host = parts[0]
-			owner = parts[1]
-			repo = strings.TrimSuffix(parts[2], ".git")
+	if strings.HasPrefix(remoteURL, "ssh://") || strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
+		if u, err := url.Parse(remoteURL); err == nil {
+			if u.Hostname() != "" {
+				host = u.Hostname()
+			}
+			parts := strings.Split(strings.Trim(strings.TrimSuffix(u.Path, ".git"), "/"), "/")
+			if len(parts) >= 2 {
+				owner = parts[0]
+				repo = parts[1]
+			}
 		}
 	} else if strings.HasPrefix(remoteURL, "git@") {
 		// git@github.com:owner/repo.git or git@github.com:owner/repo
@@ -242,7 +231,7 @@ func GetRepoInfo() (host, owner, repo string, err error) {
 }
 
 // getWorkflowRuns gets the latest successful runs for a specific workflow file
-func (c *Client) getWorkflowRuns(_ context.Context, workflowPath string) ([]workflowRun, error) {
+func (c *Client) getWorkflowRuns(workflowPath string) ([]workflowRun, error) {
 	if runs, ok := c.runsCache[workflowPath]; ok {
 		return runs, nil
 	}
@@ -261,5 +250,5 @@ func (c *Client) getWorkflowRuns(_ context.Context, workflowPath string) ([]work
 	}
 
 	c.runsCache[workflowPath] = response.WorkflowRuns
-	return c.runsCache[workflowPath], nil
+	return response.WorkflowRuns, nil
 }

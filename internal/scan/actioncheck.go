@@ -53,14 +53,8 @@ func verifyContainerActions(candidates []*Candidate, ineligibleJobs []*Ineligibl
 			}
 		}
 		if len(dockerRefs) > 0 {
-			ineligibleJobs = append(ineligibleJobs, &IneligibleJob{
-				WorkflowPath: c.WorkflowPath,
-				JobID:        c.JobID,
-				JobName:      c.JobName,
-				LineNumber:   c.LineNumber,
-				Reasons: []string{fmt.Sprintf(
-					"uses Docker container action(s) (%s)", strings.Join(dockerRefs, ", "))},
-			})
+			ineligibleJobs = append(ineligibleJobs, c.toIneligible(fmt.Sprintf(
+				"uses Docker container action(s) (%s)", strings.Join(dockerRefs, ", "))))
 			continue
 		}
 		remaining = append(remaining, c)
@@ -74,7 +68,7 @@ func (v *actionVerifier) isDockerAction(ref string, depth int) bool {
 	if depth > maxActionDepth {
 		return false
 	}
-	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "docker/") {
+	if workflow.IsContainerActionRef(ref) {
 		return true
 	}
 	for _, prefix := range knownNonDockerPrefixes {
@@ -130,46 +124,28 @@ func resolveChildRef(parent, child string) string {
 		return "./" + path.Join(strings.TrimPrefix(parent, "./"), rel)
 	}
 
-	spec, version, _ := strings.Cut(parent, "@")
-	parts := strings.SplitN(spec, "/", 3)
-	if len(parts) < 2 {
+	owner, repo, _, version, err := api.ParseActionRef(parent)
+	if err != nil {
 		return child
 	}
-	ref := parts[0] + "/" + parts[1] + "/" + rel
+	ref := owner + "/" + repo + "/" + rel
 	if version != "" {
 		ref += "@" + version
 	}
 	return ref
 }
 
-// defaultActionResolver resolves local references from disk and remote
-// references via the GitHub contents API. In offline mode remote lookups
-// return errOfflineResolution and detection falls back to the prefix
+// newActionResolver resolves local references from disk and remote references
+// via the GitHub contents API. A nil client (offline mode) makes remote
+// lookups return errOfflineResolution, so detection falls back to the prefix
 // heuristics alone.
-func defaultActionResolver(offline bool) actionResolver {
-	var client *api.Client
-	var clientErr error
-	initialized := false
-
+func newActionResolver(client *api.Client) actionResolver {
 	return func(ref string) (*api.ActionMetadata, error) {
 		if strings.HasPrefix(ref, "./") {
 			return loadLocalActionMetadata(strings.TrimPrefix(ref, "./"))
 		}
-		if offline {
+		if client == nil {
 			return nil, errOfflineResolution
-		}
-
-		if !initialized {
-			initialized = true
-			host, owner, repo, err := api.GetRepoInfo()
-			if err != nil {
-				// Actions still resolve against the default host.
-				host, owner, repo = "", "", ""
-			}
-			client, clientErr = api.NewClient(host, owner, repo)
-		}
-		if clientErr != nil {
-			return nil, clientErr
 		}
 
 		owner, repo, subpath, version, err := api.ParseActionRef(ref)
@@ -184,7 +160,7 @@ func defaultActionResolver(offline bool) actionResolver {
 // scanned repository (uses: ./path/to/action).
 func loadLocalActionMetadata(dir string) (*api.ActionMetadata, error) {
 	var lastErr error
-	for _, name := range []string{"action.yml", "action.yaml"} {
+	for _, name := range api.ActionMetadataFilenames {
 		data, err := os.ReadFile(path.Join(dir, name))
 		if err != nil {
 			lastErr = err

@@ -56,6 +56,10 @@ func ParseActionMetadata(data []byte) (*ActionMetadata, error) {
 	}, nil
 }
 
+// ActionMetadataFilenames are the file names an action's metadata may use,
+// in lookup order. Shared by the contents-API fetch and local-action reads.
+var ActionMetadataFilenames = []string{"action.yml", "action.yaml"}
+
 // contentsResponse is the GitHub contents API response for a single file.
 type contentsResponse struct {
 	Content  string `json:"content"`
@@ -66,7 +70,7 @@ type contentsResponse struct {
 // action from the GitHub contents API.
 func (c *Client) GetActionMetadata(owner, repo, subpath, ref string) (*ActionMetadata, error) {
 	var lastErr error
-	for _, name := range []string{"action.yml", "action.yaml"} {
+	for _, name := range ActionMetadataFilenames {
 		filePath := name
 		if subpath != "" {
 			filePath = subpath + "/" + name
